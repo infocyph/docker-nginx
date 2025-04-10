@@ -1,0 +1,28 @@
+# Ignore version control files
+.git
+.gitignore
+.github
+
+# Ignore documentation and metadata files
+LICENSE
+*.md
+
+# Ignore environment files
+.env
+.env.*
+
+# Ignore Node.js modules
+node_modules
+npm-debug.log
+
+# Ignore temporary and cache files
+tmp/
+cache/
+
+# Ignore build artifacts and archives
+*.tar
+*.zip
+
+# Ignore Docker Compose files
+docker-compose.yml
+docker-compose*.yaml
