@@ -3,6 +3,8 @@ name: Docker Publish
 on:
   release:
     types: [published]
+  schedule:
+    - cron: '0 0 * * *'
 
 jobs:
   push_to_registries:
