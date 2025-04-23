@@ -1,4 +1,4 @@
-FROM nginx:mainline-alpine
+FROM nginx:alpine
 LABEL org.opencontainers.image.source="https://github.com/infocyph/docker-nginx"
 LABEL org.opencontainers.image.description="NGINX with updated params"
 LABEL org.opencontainers.image.licenses="MIT"
@@ -20,14 +20,15 @@ RUN mkdir -p /etc/share/rootCA /etc/mkcert && \
       echo '#!/bin/sh'; \
       echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \
       echo '  export BANNER_SHOWN=1'; \
-      echo '  show-banner "RUNNER (SUPERVISOR)"'; \
+      echo "  NGINX_VERSION=\$(nginx -v 2>&1 | sed -n 's|^nginx version: nginx/\([0-9\.]*\).*|\1|p')"; \
+      echo '  show-banner "Nginx ${NGINX_VERSION}"'; \
       echo 'fi'; \
     } > /etc/profile.d/banner-hook.sh && \
     chmod +x /etc/profile.d/banner-hook.sh && \
     { \
       echo 'if [ -n "$PS1" ] && [ -z "${BANNER_SHOWN-}" ]; then'; \
       echo '  export BANNER_SHOWN=1'; \
-      echo '  show-banner "RUNNER (SUPERVISOR)"'; \
+      echo '  show-banner "Nginx ${NGINX_VERSION}"'; \
       echo 'fi'; \
     } >> /root/.bashrc
 EXPOSE 80 443
