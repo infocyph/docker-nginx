@@ -28,7 +28,7 @@ proxy_set_header X-Request-ID $request_id;
 # WebSockets / HMR (Node, Vite, Next dev, Socket.IO)
 proxy_set_header Upgrade $http_upgrade;
 proxy_set_header Connection $connection_upgrade;
-
+proxy_http_version 1.1;
 
 # Timeouts (dev-friendly)
 proxy_read_timeout 600s;
