@@ -17,13 +17,13 @@ COPY scripts/proxy-params.sh /usr/local/bin/proxy_params.sh
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
 
-RUN mkdir -p /etc/share/rootCA /etc/mkcert /etc/nginx/http.d && \
+RUN mkdir -p /etc/share/rootCA /etc/mkcert /etc/nginx/conf.d && \
     printf '%s\n' \
       'map $http_upgrade $connection_upgrade {' \
       '  default upgrade;' \
       "  ''      close;" \
       '}' \
-      > /etc/nginx/http.d/00-connection-upgrade-map.conf && \
+      > /etc/nginx/conf.d/00-connection-upgrade-map.conf && \
     chmod +x /usr/local/bin/fcgi_params.sh /usr/local/bin/proxy_params.sh /usr/local/bin/show-banner /usr/local/bin/chromacat && \
     /usr/local/bin/fcgi_params.sh && \
     /usr/local/bin/proxy_params.sh && \
