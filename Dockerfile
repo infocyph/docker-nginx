@@ -12,21 +12,30 @@ ENV LANG=en_US.UTF-8 \
 
 COPY scripts/fcgi-params.sh /usr/local/bin/fcgi_params.sh
 COPY scripts/proxy-params.sh /usr/local/bin/proxy_params.sh
+
+# locals.conf generator + entrypoint
+COPY scripts/render-locals.sh /usr/local/bin/render-locals.sh
+COPY scripts/nginx-entrypoint.sh /usr/local/bin/nginx-entrypoint.sh
+
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
 
 RUN set -eux; \
-    chmod +x /usr/local/bin/fcgi_params.sh /usr/local/bin/proxy_params.sh /usr/local/bin/show-banner /usr/local/bin/chromacat; \
+    chmod +x \
+      /usr/local/bin/fcgi_params.sh \
+      /usr/local/bin/proxy_params.sh \
+      /usr/local/bin/render-locals.sh \
+      /usr/local/bin/nginx-entrypoint.sh \
+      /usr/local/bin/show-banner \
+      /usr/local/bin/chromacat; \
     mkdir -p /etc/share/rootCA /etc/mkcert; \
     NGINX_CONF="/etc/nginx/nginx.conf"; \
-    if ! grep -q 'map $http_upgrade $connection_upgrade' "$NGINX_CONF"; then \
+    if ! grep -q 'include /etc/nginx/locals.conf;' "$NGINX_CONF"; then \
       sed -i '/^[[:space:]]*include[[:space:]]\+\/etc\/nginx\/conf\.d\/\*\.conf;[[:space:]]*$/i\
-    map $http_upgrade $connection_upgrade {\
-      default upgrade;\
-      ""      close;\
-    }\
+    include /etc/nginx/locals.conf;\
 ' "$NGINX_CONF"; \
     fi; \
+    test -f /etc/nginx/locals.conf || : > /etc/nginx/locals.conf; \
     /usr/local/bin/fcgi_params.sh; \
     /usr/local/bin/proxy_params.sh; \
     mkdir -p /etc/profile.d; \
@@ -48,4 +57,7 @@ RUN set -eux; \
     nginx -t
 
 EXPOSE 80 443
+
+# Regenerate locals.conf on every start, validate, then run nginx
+ENTRYPOINT ["/usr/local/bin/nginx-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
