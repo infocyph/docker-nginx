@@ -12,9 +12,14 @@ backup_if_exists() {
 
 write_file() {
   local f="$1"
-  local tmp
-  tmp="$(mktemp)"
+  local dir tmp
+  dir="$(dirname "$f")"
+  install -d -m 0755 "$dir"
+
+  tmp="$(mktemp "${dir}/.tmp.$(basename "$f").XXXXXX")"
   cat >"$tmp"
+
+  # atomic replace; ensure mode
   install -m 0644 "$tmp" "$f"
   rm -f "$tmp"
 }
@@ -30,35 +35,35 @@ write_file "$PROXY_PARAMS_FILE" <<'EOF'
 # =============================================================================
 
 # Canonical identity / scheme
-proxy_set_header Host $host;
-proxy_set_header X-Forwarded-Host $host;
+proxy_set_header Host              $host;
+proxy_set_header X-Forwarded-Host  $host;
 proxy_set_header X-Forwarded-Proto $scheme;
-proxy_set_header X-Forwarded-Port $server_port;
+proxy_set_header X-Forwarded-Port  $server_port;
 
 # Canonical client IP chain
-proxy_set_header X-Real-IP $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
 
 # Request correlation (good for logs/tracing)
-proxy_set_header X-Request-ID $request_id;
+proxy_set_header X-Request-ID      $request_id;
 
 # Timeouts (dev-friendly)
 proxy_read_timeout 600s;
 proxy_send_timeout 600s;
 
-# Optional vendor headers
-proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
-proxy_set_header True-Client-IP $http_true_client_ip;
-proxy_set_header Fastly-Client-IP $http_fastly_client_ip;
+# Optional vendor headers (harmless if absent)
+proxy_set_header CF-Connecting-IP  $http_cf_connecting_ip;
+proxy_set_header True-Client-IP    $http_true_client_ip;
+proxy_set_header Fastly-Client-IP  $http_fastly_client_ip;
 EOF
 
 # 2) WebSockets / HMR (opt-in per vhost/location)
 write_file "$PROXY_WEBSOCKET_FILE" <<'EOF'
 # =============================================================================
-# WebSockets / HMR (Node, Vite, Next dev, Socket.IO) — include per-location
+# WebSockets / HMR — include per-location
 # =============================================================================
 proxy_http_version 1.1;
-proxy_set_header Upgrade $http_upgrade;
+proxy_set_header Upgrade    $http_upgrade;
 proxy_set_header Connection $connection_upgrade;
 EOF
 
@@ -69,6 +74,9 @@ write_file "$PROXY_STREAMING_FILE" <<'EOF'
 # =============================================================================
 proxy_buffering off;
 proxy_request_buffering off;
+
+# Avoid temp-file spooling for large upstream responses:
+proxy_max_temp_file_size 0;
 EOF
 
 echo "✅ Proxy files written:"
