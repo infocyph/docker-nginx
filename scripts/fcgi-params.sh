@@ -2,13 +2,14 @@
 set -euo pipefail
 
 FASTCGI_PARAMS_FILE="/etc/nginx/fastcgi_params"
+STREAMING_FILE="/etc/nginx/fastcgi_streaming"
 
 [[ -f "$FASTCGI_PARAMS_FILE" ]] || { echo "Error: $FASTCGI_PARAMS_FILE not found" >&2; exit 1; }
 
 # Keep first backup only (so repeated runs don't destroy the original backup)
 [[ -f "${FASTCGI_PARAMS_FILE}.bak" ]] || cp -a -- "$FASTCGI_PARAMS_FILE" "${FASTCGI_PARAMS_FILE}.bak"
 
-# Ensure file ends with newline before appending (avoids glued lines)
+# Ensure file ends with newline before appending (avoid glued lines)
 tail -c 1 "$FASTCGI_PARAMS_FILE" | read -r _ || echo >>"$FASTCGI_PARAMS_FILE"
 
 PARAMS=(
@@ -35,16 +36,33 @@ has_param() {
 
 add_param() {
     local key="$1" val="$2"
-    if has_param "$key"; then
-        return 0
-    fi
+    has_param "$key" && return 0
     printf 'fastcgi_param %s %s;\n' "$key" "$val" >>"$FASTCGI_PARAMS_FILE"
 }
 
+# Add params
 for pair in "${PARAMS[@]}"; do
     IFS='|' read -r key val <<<"$pair"
     add_param "$key" "$val"
 done
 
+# Write FastCGI streaming include (opt-in per vhost/location)
+# (This file is safe to include only when needed; does not affect normal traffic.)
+if [[ -f "$STREAMING_FILE" ]]; then
+    [[ -f "${STREAMING_FILE}.bak" ]] || cp -a -- "$STREAMING_FILE" "${STREAMING_FILE}.bak"
+fi
+
+tmp="$(mktemp)"
+cat >"$tmp" <<'EOF'
+# =============================================================================
+# FastCGI streaming / SSE / long-poll — include per-location when needed
+# =============================================================================
+fastcgi_buffering off;
+fastcgi_request_buffering off;
+EOF
+install -m 0644 "$tmp" "$STREAMING_FILE"
+rm -f "$tmp"
+
 echo "✅ FastCGI parameters updated: $FASTCGI_PARAMS_FILE"
+echo "✅ FastCGI streaming include written: $STREAMING_FILE"
 rm -f -- "$0"
