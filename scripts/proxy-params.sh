@@ -57,6 +57,7 @@ proxy_set_header X-Request-ID $request_id;
 # Timeouts (dev-friendly)
 proxy_read_timeout 600s;
 proxy_send_timeout 600s;
+proxy_connect_timeout 10s;
 
 # Optional vendor headers (safe to keep even if unset)
 proxy_set_header CF-Connecting-IP $http_cf_connecting_ip;
@@ -83,8 +84,6 @@ write_atomic "$PROXY_STREAMING_FILE" <<'EOF'
 # =============================================================================
 proxy_buffering off;
 proxy_request_buffering off;
-
-# Avoid temp-file spooling for large upstream responses:
 proxy_max_temp_file_size 0;
 EOF
 
