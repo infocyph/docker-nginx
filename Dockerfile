@@ -12,8 +12,6 @@ ENV LANG=en_US.UTF-8 \
 
 COPY scripts/fcgi-params.sh /usr/local/bin/fcgi_params.sh
 COPY scripts/proxy-params.sh /usr/local/bin/proxy_params.sh
-
-# locals.conf generator + entrypoint
 COPY scripts/render-locals.sh /usr/local/bin/render-locals.sh
 COPY scripts/nginx-entrypoint.sh /usr/local/bin/nginx-entrypoint.sh
 
@@ -28,7 +26,8 @@ RUN set -eux; \
       /usr/local/bin/nginx-entrypoint.sh \
       /usr/local/bin/show-banner \
       /usr/local/bin/chromacat; \
-    mkdir -p /etc/share/rootCA /etc/mkcert; \
+    mkdir -p /etc/share/rootCA /etc/mkcert /var/log/nginx; \
+    chmod 0755 /var/log/nginx; \
     NGINX_CONF="/etc/nginx/nginx.conf"; \
     if ! grep -q 'include /etc/nginx/locals.conf;' "$NGINX_CONF"; then \
       sed -i '/^[[:space:]]*include[[:space:]]\+\/etc\/nginx\/conf\.d\/\*\.conf;[[:space:]]*$/i\
