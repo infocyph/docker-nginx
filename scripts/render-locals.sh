@@ -51,18 +51,36 @@ is_predefined_host() {
   echo "$PREDEFINED_ROUTES" | awk 'NF==2 {print $1}' | grep -qx "$h"
 }
 
+# Build server_name list (predefined + user, user cannot override predefined)
+build_server_names() {
+  # predefined first
+  echo "$PREDEFINED_ROUTES" | awk 'NF==2 {print $1}'
+  # then user hosts (filtered)
+  emit_user_routes | awk '{print $1}' | while read -r h; do
+    [ -n "${h:-}" ] || continue
+    if is_predefined_host "$h"; then
+      continue
+    fi
+    echo "$h"
+  done
+}
+
+# Flatten list to one line: "a b c"
+SERVER_NAMES="$(build_server_names | awk 'NF{print}' | LC_ALL=C sort -u | awk '{printf "%s ", $0} END{print ""}')"
+SERVER_NAMES="$(printf '%s' "$SERVER_NAMES" | awk '{$1=$1;print}')" # trim
+
 TMP="${OUT}.tmp"
 : >"$TMP"
 
-cat >>"$TMP" <<'EOF'
-# Required by /etc/nginx/proxy_websocket (if you include it elsewhere)
-map $http_upgrade $connection_upgrade {
+cat >>"$TMP" <<EOF
+# Required by /etc/nginx/proxy_websocket
+map \$http_upgrade \$connection_upgrade {
   default upgrade;
   ""      close;
 }
 
-# Host -> Upstream map (for wildcard proxy)
-map $host $upstream {
+# Host -> Upstream map (router)
+map \$host \$upstream {
   default "";
 EOF
 
@@ -79,29 +97,29 @@ emit_user_routes | while read -r host upstream; do
   printf '  %s %s;\n' "$host" "$upstream" >>"$TMP"
 done
 
-cat >>"$TMP" <<'EOF'
+cat >>"$TMP" <<EOF
 }
 
-# Safe log filename base: strip optional :port from Host header and allow only [a-z0-9.-]
-map $http_host $log_host {
+# Safe access log filename (host[:port] -> host)
+map \$http_host \$log_host {
   default "invalid-host";
-  ~^(?<h>[a-z0-9.-]+)(?::\d+)?$ $h;
+  ~^(?<h>[a-z0-9.-]+)(?::\\d+)?\$ \$h;
 }
 
-# HTTP -> HTTPS redirect
+# Redirect only for routed hosts (NOT wildcard)
 server {
   listen 80;
-  server_name .localhost;
-  return 301 https://$host$request_uri;
+  server_name ${SERVER_NAMES};
+  return 301 https://\$host\$request_uri;
   access_log off;
   error_log /dev/null;
 }
 
-# Wildcard HTTPS proxy for *.localhost
+# HTTPS router only for routed hosts (NOT wildcard)
 server {
   listen 443 ssl;
   http2 on;
-  server_name .localhost;
+  server_name ${SERVER_NAMES};
 
   ssl_certificate /etc/mkcert/nginx-proxy.pem;
   ssl_certificate_key /etc/mkcert/nginx-proxy-key.pem;
@@ -119,9 +137,8 @@ server {
   client_max_body_size 10G;
   client_body_timeout 300s;
 
-  # domain-specific logs (safe) — must use $log_host, not ${log_host}
-  access_log /var/log/nginx/$log_host.access.log;
-  error_log  /var/log/nginx/$log_host.error.log warn;
+  access_log /var/log/nginx/\$log_host.access.log;
+  error_log  /var/log/nginx/localhost.error.log warn;
 
   gzip on;
   gzip_vary on;
@@ -133,11 +150,13 @@ server {
   resolver 127.0.0.11 ipv6=off valid=30s;
   resolver_timeout 2s;
 
-  if ($upstream = "") { return 404; }
-
   location / {
     include /etc/nginx/proxy_params;
-    proxy_pass http://$upstream;
+
+    # \$upstream is always set for these server_names, but keep safety:
+    if (\$upstream = "") { return 404; }
+
+    proxy_pass http://\$upstream;
     proxy_redirect off;
   }
 }
