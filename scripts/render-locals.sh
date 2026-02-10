@@ -15,9 +15,11 @@ kibana.localhost kibana:5601
 
 # Additive user routes: "a.localhost=svc:port,b.localhost=svc:port"
 LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
+
 emit_user_routes() {
   [ -n "${LOCALHOST_ROUTES:-}" ] || return 0
 
+  # Output lines: "<host> <upstream>"
   printf '%s' "$LOCALHOST_ROUTES" | awk '
     BEGIN { RS="," }
     {
@@ -53,12 +55,26 @@ TMP="${OUT}.tmp"
 : >"$TMP"
 
 cat >>"$TMP" <<'EOF'
+# --- WebSocket helpers (used by /etc/nginx/proxy_websocket) ---
 map $http_upgrade $connection_upgrade {
   default upgrade;
   ""      close;
 }
 
-map $host $upstream {
+# --- Normalize host for routing/logging (strip :port) ---
+map $http_host $host_no_port {
+  default $host;
+  ~^(?<h>[^:]+):\d+$ $h;
+}
+
+# Safe log filename host (also strips :port). Falls back if host is odd.
+map $http_host $log_host {
+  default "invalid-host";
+  ~^(?<h>[a-z0-9.-]+)(?::\d+)?$ $h;
+}
+
+# --- Route table: host -> upstream (svc:port) ---
+map $host_no_port $upstream {
   default "";
 EOF
 
@@ -78,30 +94,27 @@ done
 cat >>"$TMP" <<'EOF'
 }
 
-# sanitize host for safe log filenames
-map $host $log_host {
-  ~^([a-z0-9.-]+)$ $1;
-  default "invalid-host";
-}
-
+# --- HTTP -> HTTPS redirect for *.localhost ---
 server {
   listen 80;
-  server_name *.localhost;
+  server_name .localhost;
   return 301 https://$host$request_uri;
   access_log off;
   error_log /dev/null;
 }
 
+# --- Wildcard HTTPS proxy for *.localhost ---
 server {
   listen 443 ssl;
   http2 on;
-  server_name *.localhost;
+  server_name .localhost;
 
   ssl_certificate /etc/mkcert/nginx-proxy.pem;
   ssl_certificate_key /etc/mkcert/nginx-proxy-key.pem;
   ssl_trusted_certificate /etc/share/rootCA/rootCA.pem;
   ssl_verify_client off;
 
+  # Keep TLSv1.1 only if you truly need legacy clients
   ssl_protocols TLSv1.1 TLSv1.2 TLSv1.3;
   ssl_ciphers "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA:AES128-SHA";
   ssl_prefer_server_ciphers on;
@@ -112,9 +125,9 @@ server {
 
   client_max_body_size 10M;
 
-  # domain-specific logs (safe)
-  access_log /var/log/nginx/${log_host}.access.log;
-  error_log  /var/log/nginx/${log_host}.error.log warn;
+  # domain-specific logs (safe) — NOTE: nginx var is $log_host (not ${log_host})
+  access_log /var/log/nginx/$log_host.access.log;
+  error_log  /var/log/nginx/$log_host.error.log warn;
 
   gzip on;
   gzip_vary on;
@@ -130,6 +143,8 @@ server {
 
   location / {
     include /etc/nginx/proxy_params;
+    include /etc/nginx/proxy_websocket;
+    proxy_set_header Host $host_no_port;
     proxy_pass http://$upstream;
     proxy_redirect off;
   }
