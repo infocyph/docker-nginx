@@ -137,8 +137,8 @@ server {
   client_max_body_size 10G;
   client_body_timeout 300s;
 
-  access_log /var/log/nginx/\$log_host.access.log;
-  error_log  /var/log/nginx/\$log_host.error.log warn;
+  access_log /var/log/nginx/localhost.access.log;
+  error_log  /var/log/nginx/localhost.error.log warn;
 
   gzip on;
   gzip_vary on;
