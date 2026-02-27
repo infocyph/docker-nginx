@@ -155,10 +155,16 @@ server {
     include /etc/nginx/proxy_params;
     include /etc/nginx/proxy_websocket;
 
-    # \$upstream is always set for these server_names, but keep safety:
-    if (\$upstream = "") { return 404; }
+    # Enable streaming only for SSE endpoint(s)
+    location = /api/tail {
+      include /etc/nginx/proxy_streaming;
+      gzip off;
+      proxy_pass http://$upstream;
+      proxy_redirect off;
+    }
 
-    proxy_pass http://\$upstream;
+    if ($upstream = "") { return 404; }
+    proxy_pass http://$upstream;
     proxy_redirect off;
   }
 }
