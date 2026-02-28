@@ -159,12 +159,12 @@ server {
     location = /api/tail {
       include /etc/nginx/proxy_streaming;
       gzip off;
-      proxy_pass http://$upstream;
+      proxy_pass http://\$upstream;
       proxy_redirect off;
     }
 
-    if ($upstream = "") { return 404; }
-    proxy_pass http://$upstream;
+    if (\$upstream = "") { return 404; }
+    proxy_pass http://\$upstream;
     proxy_redirect off;
   }
 }
