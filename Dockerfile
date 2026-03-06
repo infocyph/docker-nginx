@@ -60,6 +60,6 @@ RUN set -eux; \
 
 EXPOSE 80 443
 
-# Regenerate locals.conf on every start, validate, then run nginx
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 CMD ["sh", "-c", "[ -s /etc/nginx/locals.conf ] && nginx -t >/dev/null 2>&1"]
 ENTRYPOINT ["/usr/local/bin/nginx-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
