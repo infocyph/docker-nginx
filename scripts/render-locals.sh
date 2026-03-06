@@ -170,4 +170,8 @@ server {
 }
 EOF
 
-mv "$TMP" "$OUT"
+if ! cmp -s "$TMP" "$OUT"; then
+  mv "$TMP" "$OUT"
+else
+  rm -f "$TMP"
+fi
