@@ -8,6 +8,7 @@ PROXY_BUFFERS_FILE="/etc/nginx/proxy_buffers"
 PROXY_WEBSOCKET_FILE="/etc/nginx/proxy_websocket"
 PROXY_STREAMING_FILE="/etc/nginx/proxy_streaming"
 PROXY_CSP_RELAX_FILE="/etc/nginx/proxy_csp_relax"
+PROXY_H2_SANITIZE_FILE="/etc/nginx/proxy_h2_sanitize"
 
 die() { echo "Error: $*" >&2; exit 1; }
 
@@ -41,6 +42,7 @@ backup_once "$PROXY_BUFFERS_FILE"
 backup_once "$PROXY_WEBSOCKET_FILE"
 backup_once "$PROXY_STREAMING_FILE"
 backup_once "$PROXY_CSP_RELAX_FILE"
+backup_once "$PROXY_H2_SANITIZE_FILE"
 
 # 1) Base proxy headers
 write_atomic "$PROXY_PARAMS_FILE" <<'EOP'
@@ -135,6 +137,19 @@ write_atomic "$PROXY_CSP_RELAX_FILE" <<'EOP'
 # =============================================================================
 proxy_hide_header Content-Security-Policy;
 add_header Content-Security-Policy "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; connect-src *; frame-src *;" always;
+EOP
+
+# 6) H2 Sanitizer
+write_atomic "$PROXY_H2_SANITIZE_FILE" <<'EOP'
+# Strip hop-by-hop headers that must not reach HTTP/2 clients
+proxy_set_header Connection "";
+proxy_set_header Upgrade "";
+proxy_hide_header Connection;
+proxy_hide_header Upgrade;
+proxy_hide_header Keep-Alive;
+proxy_hide_header Transfer-Encoding;
+proxy_hide_header HTTP2-Settings;
+proxy_hide_header Alt-Svc;
 EOP
 
 echo "✅ Proxy files written:"
