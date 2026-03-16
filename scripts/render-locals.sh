@@ -122,8 +122,8 @@ server {
   http2 on;
   server_name ${SERVER_NAMES};
 
-  ssl_certificate /etc/mkcert/nginx-proxy.pem;
-  ssl_certificate_key /etc/mkcert/nginx-proxy-key.pem;
+  ssl_certificate /etc/mkcert/lds-server.pem;
+  ssl_certificate_key /etc/mkcert/lds-server-key.pem;
   ssl_trusted_certificate /etc/share/rootCA/rootCA.pem;
   ssl_verify_client off;
 
