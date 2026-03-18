@@ -15,8 +15,8 @@ ENV LANG=en_US.UTF-8 \
 
 COPY scripts/fcgi-params.sh /usr/local/bin/fcgi_params.sh
 COPY scripts/proxy-params.sh /usr/local/bin/proxy_params.sh
-COPY scripts/render-locals.sh /usr/local/bin/render-locals.sh
-COPY scripts/nginx-entrypoint.sh /usr/local/bin/nginx-entrypoint.sh
+COPY scripts/render-locals.sh /usr/local/bin/render-locals
+COPY scripts/nginx-entrypoint.sh /usr/local/bin/nginx-entrypoint
 
 ADD https://raw.githubusercontent.com/infocyph/Scriptomatic/master/bash/banner.sh /usr/local/bin/show-banner
 ADD https://raw.githubusercontent.com/infocyph/Toolset/main/ChromaCat/chromacat /usr/local/bin/chromacat
@@ -25,8 +25,8 @@ RUN set -eux; \
     chmod +x \
       /usr/local/bin/fcgi_params.sh \
       /usr/local/bin/proxy_params.sh \
-      /usr/local/bin/render-locals.sh \
-      /usr/local/bin/nginx-entrypoint.sh \
+      /usr/local/bin/render-locals \
+      /usr/local/bin/nginx-entrypoint \
       /usr/local/bin/show-banner \
       /usr/local/bin/chromacat; \
     mkdir -p /etc/share/rootCA /etc/mkcert /var/log/nginx; \
@@ -60,6 +60,6 @@ RUN set -eux; \
 
 EXPOSE 80 443
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 CMD ["sh", "-c", "[ -s /etc/nginx/locals.conf ] && nginx -t >/dev/null 2>&1"]
-ENTRYPOINT ["/usr/local/bin/nginx-entrypoint.sh"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 CMD ["sh", "-c", "nginx -t >/dev/null 2>&1"]
+ENTRYPOINT ["nginx-entrypoint"]
 CMD ["nginx", "-g", "daemon off;"]
