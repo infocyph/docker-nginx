@@ -9,6 +9,8 @@ fi
 CONF_DIR="/etc/nginx/conf.d"
 AUTO_DISABLE_INVALID_CONFS="${AUTO_DISABLE_INVALID_CONFS:-1}"
 MAX_DISABLE_ATTEMPTS="${MAX_DISABLE_ATTEMPTS:-100}"
+AUTO_RESTORE_DISABLED_CONFS="${AUTO_RESTORE_DISABLED_CONFS:-1}"
+AUTO_RESTORE_INTERVAL_SECONDS="${AUTO_RESTORE_INTERVAL_SECONDS:-5}"
 
 is_true() {
   case "${1:-}" in
@@ -17,10 +19,15 @@ is_true() {
   esac
 }
 
+list_disabled_confs() {
+  [ -d "$CONF_DIR" ] || return 0
+  find "$CONF_DIR" -maxdepth 1 -type f -name '*.conf.disabled*'
+}
+
 restore_disabled_confs() {
   [ -d "$CONF_DIR" ] || mkdir -p "$CONF_DIR"
 
-  find "$CONF_DIR" -maxdepth 1 -type f -name '*.conf.disabled*' | while IFS= read -r file; do
+  list_disabled_confs | while IFS= read -r file; do
     [ -n "$file" ] || continue
 
     base="$(basename "$file")"
@@ -63,6 +70,10 @@ disable_bad_conf() {
   echo "WARN: disabled invalid Nginx conf: $bad_conf -> $target" >&2
 }
 
+count_disabled_confs() {
+  list_disabled_confs | wc -l | awk '{print $1}'
+}
+
 validate_nginx_config() {
   if ! is_true "$AUTO_DISABLE_INVALID_CONFS"; then
     nginx -t
@@ -96,8 +107,54 @@ validate_nginx_config() {
   done
 }
 
+start_auto_restore_loop() {
+  if ! is_true "$AUTO_DISABLE_INVALID_CONFS" || ! is_true "$AUTO_RESTORE_DISABLED_CONFS"; then
+    return 0
+  fi
+
+  interval="$AUTO_RESTORE_INTERVAL_SECONDS"
+  case "$interval" in
+  ''|*[!0-9]*)
+    echo "WARN: invalid AUTO_RESTORE_INTERVAL_SECONDS=$interval; defaulting to 5." >&2
+    interval=5
+    ;;
+  esac
+  if [ "$interval" -lt 1 ]; then
+    interval=1
+  fi
+
+  (
+    while :; do
+      sleep "$interval"
+
+      before="$(count_disabled_confs)"
+      if [ "$before" -eq 0 ]; then
+        continue
+      fi
+
+      restore_disabled_confs
+      if ! validate_nginx_config; then
+        echo "WARN: auto-restore validation failed; will retry." >&2
+        continue
+      fi
+
+      after="$(count_disabled_confs)"
+      if [ "$after" -lt "$before" ]; then
+        if nginx -s reload >/dev/null 2>&1; then
+          echo "INFO: restored disabled Nginx conf(s); reloaded Nginx." >&2
+        else
+          echo "WARN: restored conf(s) but failed to reload Nginx; retrying later." >&2
+        fi
+      fi
+    done
+  ) &
+
+  echo "INFO: started Nginx disabled-conf auto-restore loop (interval: ${interval}s)." >&2
+}
+
 restore_disabled_confs
 render-locals
 validate_nginx_config
+start_auto_restore_loop
 
 exec "$@"
