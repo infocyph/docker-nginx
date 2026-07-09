@@ -6,7 +6,8 @@ OUT="/etc/nginx/locals.conf"
 # Non-overridable defaults (edit here)
 # Format: "host upstream"
 PREDEFINED_ROUTES='
-admin.localhost server-tools:9911
+admin.localhost server-tools:9912
+admin-api.localhost server-tools:9911
 webmail.localhost mailpit:8025
 db.localhost cloud-beaver:8978
 ri.localhost redis-insight:5540
