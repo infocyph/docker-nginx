@@ -34,8 +34,9 @@ RUN set -eux; \
       -o /usr/local/bin/show-banner; \
     test -s /usr/local/bin/show-banner; \
     bash -n /usr/local/bin/show-banner; \
-    curl -fsSLo /tmp/toolset-install.sh \
-      "https://github.com/infocyph/Toolset/releases/latest/download/install.sh"; \
+    curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 \
+      "https://github.com/infocyph/Toolset/releases/latest/download/install.sh" \
+      -o /tmp/toolset-install.sh; \
     test -s /tmp/toolset-install.sh; \
     bash -n /tmp/toolset-install.sh; \
     bash /tmp/toolset-install.sh --prefix /usr/local/bin chromacat; \
