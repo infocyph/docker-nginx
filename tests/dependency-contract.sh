@@ -14,4 +14,13 @@ if grep -RIn --exclude-dir=.git 'raw.githubusercontent.com/infocyph/Toolset/main
   exit 1
 fi
 
+grep -Fq 'https://raw.githubusercontent.com/infocyph/Scriptomatic/main/bash/banner.sh' Dockerfile
+grep -Fq 'https://github.com/infocyph/Toolset/releases/latest/download/install.sh' Dockerfile
+
+retry_count="$(grep -Fc -- '--retry 3 --retry-delay 1 --connect-timeout 10' Dockerfile)"
+if [ "$retry_count" -lt 2 ]; then
+  echo 'Both mutable dependency fetches must use bounded retry/connect-timeout behavior.' >&2
+  exit 1
+fi
+
 printf 'Dependency contracts passed.\n'
