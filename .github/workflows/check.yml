@@ -1,0 +1,109 @@
+name: Check
+
+on:
+  push:
+    branches: [ "main", "master", "plan/**" ]
+  pull_request:
+    branches: [ "main", "master", "develop", "development" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: Static and contract checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck
+
+      - name: Static checks
+        run: bash tests/static.sh
+
+      - name: Dependency contracts
+        run: bash tests/dependency-contract.sh
+
+      - name: Install actionlint
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          mkdir -p "$GOBIN"
+          go install github.com/rhysd/actionlint/cmd/actionlint@latest
+
+      - name: Lint workflows
+        run: "${{ runner.temp }}/bin/actionlint"
+
+  runtime:
+    name: amd64 build and release gate
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build amd64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          push: false
+          tags: infocyph/nginx:ci
+          cache-from: type=gha,scope=check-amd64
+          cache-to: type=gha,scope=check-amd64,mode=max
+
+      - name: Final amd64 release gate
+        run: bash tests/release-gate.sh infocyph/nginx:ci
+
+  arm64:
+    name: arm64 build and startup smoke
+    needs: static
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build arm64 image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          pull: true
+          push: false
+          tags: infocyph/nginx:ci-arm64
+          cache-from: type=gha,scope=check-arm64
+          cache-to: type=gha,scope=check-arm64,mode=max
+
+      - name: arm64 command smoke
+        run: |
+          docker run --rm --platform linux/arm64 --entrypoint sh infocyph/nginx:ci-arm64 -ec '
+            test "$(uname -m)" = aarch64
+            nginx -v
+            chromacat --version
+          '
