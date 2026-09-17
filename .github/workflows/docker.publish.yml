@@ -272,9 +272,9 @@ jobs:
           set -euo pipefail
 
           resolve_digest() {
-            local ref="$1" output digest attempt
+            local ref="$1" output digest
 
-            for attempt in $(seq 1 12); do
+            for _ in $(seq 1 12); do
               if output="$(docker buildx imagetools inspect "$ref" 2>&1)"; then
                 digest="$(printf '%s\n' "$output" | awk '/^Digest:/ {print $2; exit}')"
                 if [[ -n "$digest" ]]; then
