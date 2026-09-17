@@ -39,6 +39,9 @@ jobs:
       - name: Publish/release contracts
         run: bash tests/release-contract.sh
 
+      - name: Documentation/release readiness contracts
+        run: bash tests/documentation-contract.sh
+
       - name: Install actionlint
         env:
           GOBIN: ${{ runner.temp }}/bin
