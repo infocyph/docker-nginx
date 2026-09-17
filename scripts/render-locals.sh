@@ -4,15 +4,18 @@ set -eu
 OUT="/etc/nginx/locals.conf"
 LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
 LOCALHOST_CLIENT_MAX_BODY_SIZE="${LOCALHOST_CLIENT_MAX_BODY_SIZE:-10G}"
+LLM_HOST="llm.localhost"
+LLM_UPSTREAM="llm-sm:11434"
 
-PREDEFINED_ROUTES='
+PREDEFINED_ROUTES="
 admin.localhost server-tools:9911
 webmail.localhost mailpit:8025
 db.localhost cloud-beaver:8978
 ri.localhost redis-insight:5540
 me.localhost mongo-express:8081
 kibana.localhost kibana:5601
-'
+${LLM_HOST} ${LLM_UPSTREAM}
+"
 
 case "$LOCALHOST_CLIENT_MAX_BODY_SIZE" in
   *[!0-9kKmMgG]*|'')
@@ -85,7 +88,7 @@ is_predefined_host() {
   printf '%s\n' "$PREDEFINED_ROUTES" | awk 'NF==2 {print $1}' | grep -qx "$h"
 }
 
-build_server_names() {
+build_redirect_server_names() {
   printf '%s\n' "$PREDEFINED_ROUTES" | awk 'NF==2 {print $1}'
   emit_user_routes | awk '{print $1}' | while read -r h; do
     [ -n "${h:-}" ] || continue
@@ -94,8 +97,21 @@ build_server_names() {
   done
 }
 
-SERVER_NAMES="$(build_server_names | awk 'NF{print}' | LC_ALL=C sort -u | awk '{printf "%s ", $0} END{print ""}')"
-SERVER_NAMES="$(printf '%s' "$SERVER_NAMES" | awk '{$1=$1;print}')"
+build_generic_server_names() {
+  printf '%s\n' "$PREDEFINED_ROUTES" | awk -v llm="$LLM_HOST" 'NF==2 && $1 != llm {print $1}'
+  emit_user_routes | awk '{print $1}' | while read -r h; do
+    [ -n "${h:-}" ] || continue
+    is_predefined_host "$h" && continue
+    printf '%s\n' "$h"
+  done
+}
+
+flatten_names() {
+  awk 'NF{print}' | LC_ALL=C sort -u | awk '{printf "%s ", $0} END{print ""}' | awk '{$1=$1;print}'
+}
+
+REDIRECT_SERVER_NAMES="$(build_redirect_server_names | flatten_names)"
+GENERIC_SERVER_NAMES="$(build_generic_server_names | flatten_names)"
 
 TMP="${OUT}.tmp.$$"
 trap 'rm -f -- "$TMP"' EXIT
@@ -108,7 +124,7 @@ map \$http_upgrade \$connection_upgrade {
   ""      "";
 }
 
-# Host -> upstream router.
+# Host -> upstream router for generic convenience hosts.
 map \$host \$upstream {
   default "";
 EOF
@@ -133,10 +149,10 @@ server {
   error_log /dev/null;
 }
 
-# Redirect only known convenience hosts.
+# Redirect only known convenience hosts, including the reserved LLM host.
 server {
   listen 80;
-  server_name ${SERVER_NAMES};
+  server_name ${REDIRECT_SERVER_NAMES};
   return 301 https://\$host\$request_uri;
   access_log off;
   error_log /dev/null;
@@ -159,11 +175,11 @@ server {
   error_log /dev/null;
 }
 
-# HTTPS convenience router for known hosts.
+# HTTPS router for normal LocalDevStack convenience hosts.
 server {
   listen 443 ssl;
   http2 on;
-  server_name ${SERVER_NAMES};
+  server_name ${GENERIC_SERVER_NAMES};
 
   ssl_certificate /etc/mkcert/lds-server.pem;
   ssl_certificate_key /etc/mkcert/lds-server-key.pem;
@@ -215,6 +231,49 @@ server {
     include /etc/nginx/proxy_websocket;
     proxy_set_header Host \$host;
     proxy_pass http://\$upstream;
+    proxy_redirect off;
+  }
+}
+
+# Dedicated Ollama/OpenAI-compatible route. llm-sm is optional and therefore
+# resolved lazily by Docker DNS at request time instead of during Nginx startup.
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name ${LLM_HOST};
+
+  ssl_certificate /etc/mkcert/lds-server.pem;
+  ssl_certificate_key /etc/mkcert/lds-server-key.pem;
+  ssl_trusted_certificate /etc/share/rootCA/rootCA.pem;
+  ssl_verify_client off;
+
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_ciphers "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256:TLS_CHACHA20_POLY1305_SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:AES256-GCM-SHA384:AES128-GCM-SHA256:AES256-SHA:AES128-SHA";
+  ssl_prefer_server_ciphers on;
+
+  ssl_session_cache shared:SSL:10m;
+  ssl_session_timeout 1d;
+  ssl_session_tickets off;
+
+  client_max_body_size ${LOCALHOST_CLIENT_MAX_BODY_SIZE};
+  client_body_timeout 300s;
+
+  access_log /var/log/nginx/localhost.access.log;
+  error_log  /var/log/nginx/localhost.error.log warn;
+
+  resolver 127.0.0.11 ipv6=off valid=5s;
+  resolver_timeout 2s;
+  set \$llm_upstream "${LLM_UPSTREAM}";
+
+  location / {
+    include /etc/nginx/proxy_params;
+    include /etc/nginx/proxy_timeouts;
+    include /etc/nginx/proxy_streaming;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header Connection "";
+    gzip off;
+    proxy_pass http://\$llm_upstream;
     proxy_redirect off;
   }
 }
