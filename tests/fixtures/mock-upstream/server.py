@@ -87,6 +87,9 @@ class Handler(BaseHTTPRequestHandler):
         self._finish_chunked()
 
     def do_GET(self):
+        if self.path == "/api/tail":
+            self._stream_native(None)
+            return
         if self.path == "/api/tags":
             self._send_json({"models": [{"name": "mock:latest"}]})
             return
