@@ -8,15 +8,19 @@ Before publishing a new stable docker-nginx release:
 
 - [ ] PR CI is green on shell syntax, ShellCheck, dependency contracts, publish contracts, actionlint, amd64 release gate, and arm64 smoke.
 - [ ] `FROM nginx:alpine` remains the rolling base.
-- [ ] Scriptomatic is consumed from canonical `main`.
-- [ ] Toolset is consumed through the latest stable checksum-verifying installer.
+- [ ] Scriptomatic is consumed from canonical `main` with bounded retry/connect-timeout handling.
+- [ ] Toolset is consumed through the latest stable checksum-verifying installer with bounded retry/connect-timeout handling.
 - [ ] the runtime image exposes only `80` and `443`.
 - [ ] the official upstream `default.conf` is absent.
-- [ ] `/etc/nginx/locals.conf` is included exactly once.
+- [ ] `/etc/nginx/locals.conf` is included exactly once and before `conf.d/*.conf`.
+- [ ] FastCGI parameters are unique and preserve the audited upstream values expected by this image.
+- [ ] TLS 1.2 and TLS 1.3 remain enabled; TLS 1.2 uses the modern AEAD-only cipher policy and the live TLS 1.2 route smoke passes.
 - [ ] convenience routing, WebSocket behavior, `/api/tail`, LLM streaming, late Docker-DNS recovery, quarantine/recovery, health, and signals pass the final release gate.
 - [ ] the publish workflow uses the current action majors enforced by `tests/release-contract.sh`.
 - [ ] stable release tags are immutable in both Docker Hub and GHCR.
 - [ ] scheduled/manual publishing resolves the latest stable docker-nginx release and updates only `latest`.
+- [ ] rolling publish inputs (`nginx:alpine`, Scriptomatic `main`, Toolset latest installer) are snapshotted before candidate builds and revalidated before registry publication.
+- [ ] the final multi-architecture publish reuses the gated candidate caches instead of forcing another base pull.
 - [ ] multi-platform publishing targets `linux/amd64` and `linux/arm64`.
 - [ ] SBOM, BuildKit provenance, and GitHub/Sigstore attestations are enabled.
 - [ ] Docker Hub and GHCR manifest digests are verified equal after push.
@@ -61,7 +65,9 @@ The stable publish workflow is intentionally strict:
 - draft/prerelease events are rejected by the stable pipeline;
 - weekly/manual refreshes rebuild only `latest` from the latest stable published docker-nginx source;
 - historical version tags are never refreshed or overwritten;
+- rolling upstream inputs are snapshotted before candidate builds and revalidated after both architecture gates, before registry login/publish;
 - candidate images are tested before registry login/publish;
+- the final multi-architecture build consumes the gated candidate caches without another forced base pull;
 - the pushed artifact is verified after publication rather than treating a successful push as the end of the release gate.
 
 ## Non-goals for the docker-nginx release
