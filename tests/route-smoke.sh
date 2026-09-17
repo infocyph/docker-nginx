@@ -93,6 +93,11 @@ printf '%s' "$response" | grep -Fq '"forwarded_port":"443"'
 printf '%s' "$response" | grep -Fq '"request_id_present":true'
 printf '%s' "$response" | grep -Fq '"connection":""'
 
+tls12_response="$(curl -skS --tlsv1.2 --tls-max 1.2 \
+  --resolve "admin.localhost:${https_port}:127.0.0.1" \
+  "https://admin.localhost:${https_port}/inspect")"
+printf '%s' "$tls12_response" | grep -Fq '"host":"admin.localhost"'
+
 ws_response="$(curl -skS --http1.1 \
   --resolve "admin.localhost:${https_port}:127.0.0.1" \
   -H 'Upgrade: websocket' \
