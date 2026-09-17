@@ -10,29 +10,28 @@ PROXY_STREAMING_FILE="/etc/nginx/proxy_streaming"
 PROXY_CSP_RELAX_FILE="/etc/nginx/proxy_csp_relax"
 PROXY_H2_SANITIZE_FILE="/etc/nginx/proxy_h2_sanitize"
 
-die() { echo "Error: $*" >&2; exit 1; }
+die() {
+    echo "Error: $*" >&2
+    exit 1
+}
 
 backup_once() {
-  local f="$1"
-  [[ -f "$f" ]] || return 0
-  [[ -f "${f}.bak" ]] && return 0
-  cp -a -- "$f" "${f}.bak" || die "failed to backup $f"
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    [[ -f "${file}.bak" ]] && return 0
+    cp -a -- "$file" "${file}.bak" || die "failed to backup $file"
 }
 
 write_atomic() {
-  local f="$1" dir tmp
+    local file="$1" dir tmp
 
-  dir="$(dirname "$f")"
-  mkdir -p "$dir" || die "failed to mkdir: $dir"
-
-  # Busybox-safe temp file creation (no mktemp dependency)
-  tmp="${f}.tmp.$$"
-  : >"$tmp" || die "failed to create temp: $tmp"
-
-  # shellcheck disable=SC2094
-  cat >"$tmp"
-  chmod 0644 "$tmp" || true
-  mv -f "$tmp" "$f" || die "failed to move $tmp to $f"
+    dir="$(dirname "$file")"
+    mkdir -p "$dir" || die "failed to create directory: $dir"
+    tmp="${file}.tmp.$$"
+    : >"$tmp" || die "failed to create temp file: $tmp"
+    cat >"$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$file" || die "failed to replace $file"
 }
 
 backup_once "$PROXY_PARAMS_FILE"
@@ -44,104 +43,80 @@ backup_once "$PROXY_STREAMING_FILE"
 backup_once "$PROXY_CSP_RELAX_FILE"
 backup_once "$PROXY_H2_SANITIZE_FILE"
 
-# 1) Base proxy headers
-write_atomic "$PROXY_PARAMS_FILE" <<'EOP'
+write_atomic "$PROXY_PARAMS_FILE" <<'EOF'
 # =============================================================================
-# Reverse-proxy headers (safe + useful defaults)
+# Reverse-proxy headers
 # =============================================================================
-
-# Canonical identity / scheme
 proxy_set_header X-Forwarded-Host  $host;
 proxy_set_header X-Forwarded-Proto $scheme;
 proxy_set_header X-Forwarded-Port  $server_port;
+proxy_set_header X-Real-IP         $remote_addr;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+proxy_set_header X-Request-ID      $request_id;
+EOF
 
-# Canonical client IP chain
-proxy_set_header X-Real-IP       $remote_addr;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-
-# Request correlation (good for logs/tracing)
-proxy_set_header X-Request-ID $request_id;
-
-# Optional vendor headers (safe to keep even if unset)
-proxy_set_header CF-Connecting-IP  $http_cf_connecting_ip;
-proxy_set_header True-Client-IP    $http_true_client_ip;
-proxy_set_header Fastly-Client-IP  $http_fastly_client_ip;
-EOP
-
-# 1b) Fixed-IP proxy helper headers
-#
-# Requirements in the vhost before including this file:
-#   set $proxy_up_host  <upstream host>;     # e.g. report.example.com
-#   set $proxy_up_proto <http|https>;        # e.g. https
-write_atomic "$PROXY_FIXEDIP_HEADERS_FILE" <<'EOP'
+write_atomic "$PROXY_FIXEDIP_HEADERS_FILE" <<'EOF'
 # =============================================================================
-# Fixed-IP proxy helpers (anti-CSRF/origin checks for admin panels/routers)
+# Fixed-IP proxy helpers (anti-CSRF/origin checks for local admin/router proxies)
+# Requires $proxy_up_host and $proxy_up_proto to be set by the vhost.
 # =============================================================================
-
-# Make upstream believe client accessed the upstream hostname (not local domain)
 proxy_set_header X-Forwarded-Host  $proxy_up_host;
 proxy_set_header X-Forwarded-Proto $proxy_up_proto;
 proxy_set_header X-Forwarded-Port  $server_port;
+proxy_set_header Origin            $proxy_up_proto://$proxy_up_host;
+proxy_set_header Referer           $proxy_up_proto://$proxy_up_host$request_uri;
+EOF
 
-# Many admin panels/routers validate Origin/Referer for login POSTs
-proxy_set_header Origin  $proxy_up_proto://$proxy_up_host;
-proxy_set_header Referer $proxy_up_proto://$proxy_up_host$request_uri;
-EOP
-
-# 2) Timeouts (keep separate so you can override per-vhost if needed)
-write_atomic "$PROXY_TIMEOUTS_FILE" <<'EOP'
+write_atomic "$PROXY_TIMEOUTS_FILE" <<'EOF'
 # =============================================================================
-# Reverse-proxy timeouts (dev-friendly)
+# Reverse-proxy timeouts (development-friendly)
 # =============================================================================
 proxy_connect_timeout 10s;
 proxy_send_timeout    600s;
 proxy_read_timeout    600s;
-EOP
+EOF
 
-# 3) Buffers (prevents "upstream sent too big header" on login-heavy apps)
-write_atomic "$PROXY_BUFFERS_FILE" <<'EOP'
+write_atomic "$PROXY_BUFFERS_FILE" <<'EOF'
 # =============================================================================
 # Reverse-proxy buffers
 # =============================================================================
 proxy_buffering on;
-
 proxy_buffer_size 16k;
 proxy_buffers 8 32k;
 proxy_busy_buffers_size 64k;
-EOP
+EOF
 
-# 4) WebSockets / HMR (opt-in per vhost/location)
-write_atomic "$PROXY_WEBSOCKET_FILE" <<'EOP'
+write_atomic "$PROXY_WEBSOCKET_FILE" <<'EOF'
 # =============================================================================
-# WebSockets / HMR (Node, Vite, Next dev, Socket.IO) — include per-location
+# WebSocket / HMR support — include per-location
+# $connection_upgrade is defined in /etc/nginx/locals.conf.
 # =============================================================================
 proxy_http_version 1.1;
 proxy_set_header Upgrade    $http_upgrade;
 proxy_set_header Connection $connection_upgrade;
-EOP
+EOF
 
-# 5) Streaming / SSE / long responses (opt-in per vhost/location)
-write_atomic "$PROXY_STREAMING_FILE" <<'EOP'
+write_atomic "$PROXY_STREAMING_FILE" <<'EOF'
 # =============================================================================
 # Streaming / SSE / long-poll — include per-location
 # =============================================================================
 proxy_buffering off;
 proxy_request_buffering off;
 proxy_max_temp_file_size 0;
-EOP
+EOF
 
-# 6) CSP relax (LAST RESORT) — include per-location
-write_atomic "$PROXY_CSP_RELAX_FILE" <<'EOP'
+write_atomic "$PROXY_CSP_RELAX_FILE" <<'EOF'
 # =============================================================================
-# Relax Content-Security-Policy (use only for LOCAL DEV)
+# Relax Content-Security-Policy — LOCAL DEVELOPMENT ONLY
 # =============================================================================
 proxy_hide_header Content-Security-Policy;
 add_header Content-Security-Policy "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; connect-src *; frame-src *;" always;
-EOP
+EOF
 
-# 6) H2 Sanitizer
-write_atomic "$PROXY_H2_SANITIZE_FILE" <<'EOP'
+write_atomic "$PROXY_H2_SANITIZE_FILE" <<'EOF'
+# =============================================================================
 # Strip hop-by-hop headers that must not reach HTTP/2 clients
+# =============================================================================
 proxy_set_header Connection "";
 proxy_set_header Upgrade "";
 proxy_hide_header Connection;
@@ -150,14 +125,15 @@ proxy_hide_header Keep-Alive;
 proxy_hide_header Transfer-Encoding;
 proxy_hide_header HTTP2-Settings;
 proxy_hide_header Alt-Svc;
-EOP
+EOF
 
-echo "✅ Proxy files written:"
-echo "  - $PROXY_PARAMS_FILE"
-echo "  - $PROXY_FIXEDIP_HEADERS_FILE"
-echo "  - $PROXY_TIMEOUTS_FILE"
-echo "  - $PROXY_BUFFERS_FILE"
-echo "  - $PROXY_WEBSOCKET_FILE"
-echo "  - $PROXY_STREAMING_FILE"
-echo "  - $PROXY_CSP_RELAX_FILE"
-rm -f -- "$0"
+printf 'Proxy files written:\n'
+printf '  - %s\n' \
+    "$PROXY_PARAMS_FILE" \
+    "$PROXY_FIXEDIP_HEADERS_FILE" \
+    "$PROXY_TIMEOUTS_FILE" \
+    "$PROXY_BUFFERS_FILE" \
+    "$PROXY_WEBSOCKET_FILE" \
+    "$PROXY_STREAMING_FILE" \
+    "$PROXY_CSP_RELAX_FILE" \
+    "$PROXY_H2_SANITIZE_FILE"

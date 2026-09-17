@@ -1,28 +1,28 @@
-# Ignore version control files
+# Version control / CI metadata
 .git
 .gitignore
 .github
 
-# Ignore documentation and metadata files
+# Documentation and repository-only metadata
+docs/
+tests/
 LICENSE
 *.md
 
-# Ignore environment files
+# Local environment files
 .env
 .env.*
 
-# Ignore Node.js modules
-node_modules
-npm-debug.log
-
-# Ignore temporary and cache files
+# Dependency / local artifact directories
+node_modules/
 tmp/
 cache/
 
-# Ignore build artifacts and archives
+# Build artifacts and archives
 *.tar
 *.zip
+npm-debug.log
 
-# Ignore Docker Compose files
+# Docker Compose files
 docker-compose.yml
 docker-compose*.yaml
