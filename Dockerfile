@@ -61,8 +61,27 @@ RUN set -eux; \
     test "$(grep -Fc 'include /etc/nginx/locals.conf;' "$NGINX_CONF")" -eq 1; \
     test -f /etc/nginx/locals.conf || : > /etc/nginx/locals.conf; \
     /usr/local/bin/fcgi_params.sh; \
+    sha256sum /etc/nginx/fastcgi_params /etc/nginx/fastcgi_streaming > /tmp/fcgi.sha256; \
+    /usr/local/bin/fcgi_params.sh; \
+    sha256sum -c /tmp/fcgi.sha256; \
     /usr/local/bin/proxy_params.sh; \
-    rm -f /usr/local/bin/fcgi_params.sh /usr/local/bin/proxy_params.sh; \
+    sha256sum \
+      /etc/nginx/proxy_params \
+      /etc/nginx/proxy_fixedip_headers \
+      /etc/nginx/proxy_timeouts \
+      /etc/nginx/proxy_buffers \
+      /etc/nginx/proxy_websocket \
+      /etc/nginx/proxy_streaming \
+      /etc/nginx/proxy_csp_relax \
+      /etc/nginx/proxy_h2_sanitize > /tmp/proxy.sha256; \
+    /usr/local/bin/proxy_params.sh; \
+    sha256sum -c /tmp/proxy.sha256; \
+    rm -f \
+      /tmp/fcgi.sha256 \
+      /tmp/proxy.sha256 \
+      /etc/nginx/*.bak \
+      /usr/local/bin/fcgi_params.sh \
+      /usr/local/bin/proxy_params.sh; \
     mkdir -p /etc/profile.d; \
     { \
       echo '#!/bin/sh'; \

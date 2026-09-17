@@ -4,49 +4,25 @@ set -euo pipefail
 FASTCGI_PARAMS_FILE="/etc/nginx/fastcgi_params"
 STREAMING_FILE="/etc/nginx/fastcgi_streaming"
 
-die() { echo "Error: $*" >&2; exit 1; }
-
-[[ -f "$FASTCGI_PARAMS_FILE" ]] || die "$FASTCGI_PARAMS_FILE not found"
-
-# Keep first backup only (re-runs must not overwrite original backup)
-[[ -f "${FASTCGI_PARAMS_FILE}.bak" ]] || cp -a -- "$FASTCGI_PARAMS_FILE" "${FASTCGI_PARAMS_FILE}.bak"
-
-# Ensure file ends with newline (avoid glued lines on append)
-ensure_newline_eof() {
-    local f="$1"
-    # empty file -> just add newline
-    [[ -s "$f" ]] || { printf '\n' >>"$f"; return 0; }
-
-    # Read last byte safely; if not newline, append newline
-    local last
-    last="$(tail -c 1 "$f" 2>/dev/null || true)"
-    [[ "$last" == $'\n' ]] || printf '\n' >>"$f"
+die() {
+    echo "Error: $*" >&2
+    exit 1
 }
-ensure_newline_eof "$FASTCGI_PARAMS_FILE"
 
-# Params to add if missing
-# NOTE: fastcgi_param keys are for upstream (PHP-FPM) env vars.
-PARAMS=(
-    # Forwarded headers (available in PHP as HTTP_X_* if you read headers)
-    'HTTP_X_REAL_IP|$remote_addr'
-    'HTTP_X_FORWARDED_FOR|$proxy_add_x_forwarded_for'
-    'HTTP_X_FORWARDED_PROTO|$scheme'
-    'HTTP_X_FORWARDED_HOST|$host'
-    'HTTP_X_FORWARDED_PORT|$server_port'
-    'HTTP_X_REQUEST_ID|$request_id'
+backup_once() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    [[ -f "${file}.bak" ]] && return 0
+    cp -a -- "$file" "${file}.bak" || die "failed to backup $file"
+}
 
-    # Canonical values many apps rely on
-    'REMOTE_ADDR|$remote_addr'
-    'REQUEST_SCHEME|$scheme'
-    'SERVER_PORT|$server_port'
-    'HTTP_HOST|$host'
+ensure_newline_eof() {
+    local file="$1" last_byte
 
-    # HTTPS-awareness for frameworks (Laravel/Symfony/etc.)
-    # $https is "on" for TLS, empty otherwise.
-    'HTTPS|$https'
-    # Optional hint used by some stacks/tools
-    'HTTP_X_FORWARDED_SSL|$https'
-)
+    [[ -s "$file" ]] || return 0
+    last_byte="$(tail -c 1 "$file" | od -An -tuC | tr -d '[:space:]')"
+    [[ "$last_byte" == "10" ]] || printf '\n' >>"$file"
+}
 
 has_param() {
     local key="$1"
@@ -54,23 +30,45 @@ has_param() {
 }
 
 add_param() {
-    local key="$1" val="$2"
+    local key="$1" value="$2"
     has_param "$key" && return 0
-    printf 'fastcgi_param %s %s;\n' "$key" "$val" >>"$FASTCGI_PARAMS_FILE"
+    printf 'fastcgi_param %s %s;\n' "$key" "$value" >>"$FASTCGI_PARAMS_FILE"
 }
 
+assert_single_param() {
+    local key="$1" count
+    count="$(grep -Ec "^[[:space:]]*fastcgi_param[[:space:]]+${key}([[:space:]]+|;)" "$FASTCGI_PARAMS_FILE" || true)"
+    [[ "$count" -eq 1 ]] || die "expected exactly one fastcgi_param for $key, found $count"
+}
+
+[[ -f "$FASTCGI_PARAMS_FILE" ]] || die "$FASTCGI_PARAMS_FILE not found"
+backup_once "$FASTCGI_PARAMS_FILE"
+ensure_newline_eof "$FASTCGI_PARAMS_FILE"
+
+PARAMS=(
+    'HTTP_X_REAL_IP|$remote_addr'
+    'HTTP_X_FORWARDED_FOR|$proxy_add_x_forwarded_for'
+    'HTTP_X_FORWARDED_PROTO|$scheme'
+    'HTTP_X_FORWARDED_HOST|$host'
+    'HTTP_X_FORWARDED_PORT|$server_port'
+    'HTTP_X_REQUEST_ID|$request_id'
+    'REMOTE_ADDR|$remote_addr'
+    'REQUEST_SCHEME|$scheme'
+    'SERVER_PORT|$server_port'
+    'HTTP_HOST|$host'
+    'HTTPS|$https'
+    'HTTP_X_FORWARDED_SSL|$https'
+)
+
 for pair in "${PARAMS[@]}"; do
-    IFS='|' read -r key val <<<"$pair"
-    add_param "$key" "$val"
+    IFS='|' read -r key value <<<"$pair"
+    add_param "$key" "$value"
+    assert_single_param "$key"
 done
 
-# Write FastCGI streaming include (opt-in per vhost/location)
-# Keep first backup only
-if [[ -f "$STREAMING_FILE" ]]; then
-    [[ -f "${STREAMING_FILE}.bak" ]] || cp -a -- "$STREAMING_FILE" "${STREAMING_FILE}.bak"
-fi
-
+backup_once "$STREAMING_FILE"
 tmp="${STREAMING_FILE}.tmp.$$"
+trap 'rm -f -- "$tmp"' EXIT
 cat >"$tmp" <<'EOF'
 # =============================================================================
 # FastCGI streaming / SSE / long-poll — include per-location when needed
@@ -78,9 +76,9 @@ cat >"$tmp" <<'EOF'
 fastcgi_buffering off;
 fastcgi_request_buffering off;
 EOF
-chmod 0644 "$tmp" || true
+chmod 0644 "$tmp"
 mv -f "$tmp" "$STREAMING_FILE"
+trap - EXIT
 
-echo "✅ FastCGI parameters updated: $FASTCGI_PARAMS_FILE"
-echo "✅ FastCGI streaming include written: $STREAMING_FILE"
-rm -f -- "$0"
+printf 'FastCGI parameters updated: %s\n' "$FASTCGI_PARAMS_FILE"
+printf 'FastCGI streaming include written: %s\n' "$STREAMING_FILE"

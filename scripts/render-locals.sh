@@ -20,7 +20,6 @@ LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
 emit_user_routes() {
   [ -n "${LOCALHOST_ROUTES:-}" ] || return 0
 
-  # Output: "<host> <upstream>"
   printf '%s' "$LOCALHOST_ROUTES" | awk '
     BEGIN { RS="," }
     {
@@ -39,9 +38,7 @@ emit_user_routes() {
       if (host !~ /^[a-z0-9.-]+$/) next
       if (upstream !~ /^[a-z0-9.-]+:[0-9]+$/) next
 
-      # dedupe by host (keep first occurrence)
       if (seen[host]++) next
-
       print host, upstream
     }
   '
@@ -52,11 +49,8 @@ is_predefined_host() {
   echo "$PREDEFINED_ROUTES" | awk 'NF==2 {print $1}' | grep -qx "$h"
 }
 
-# Build server_name list (predefined + user, user cannot override predefined)
 build_server_names() {
-  # predefined first
   echo "$PREDEFINED_ROUTES" | awk 'NF==2 {print $1}'
-  # then user hosts (filtered)
   emit_user_routes | awk '{print $1}' | while read -r h; do
     [ -n "${h:-}" ] || continue
     if is_predefined_host "$h"; then
@@ -66,18 +60,19 @@ build_server_names() {
   done
 }
 
-# Flatten list to one line: "a b c"
 SERVER_NAMES="$(build_server_names | awk 'NF{print}' | LC_ALL=C sort -u | awk '{printf "%s ", $0} END{print ""}')"
-SERVER_NAMES="$(printf '%s' "$SERVER_NAMES" | awk '{$1=$1;print}')" # trim
+SERVER_NAMES="$(printf '%s' "$SERVER_NAMES" | awk '{$1=$1;print}')"
 
 TMP="${OUT}.tmp"
 : >"$TMP"
 
 cat >>"$TMP" <<EOF
-# Required by /etc/nginx/proxy_websocket
+# Required by /etc/nginx/proxy_websocket.
+# Empty values are not sent upstream, so ordinary HTTP requests keep normal
+# HTTP/1.1 connection semantics instead of forcing Connection: close.
 map \$http_upgrade \$connection_upgrade {
   default upgrade;
-  ""      close;
+  ""      "";
 }
 
 # Host -> Upstream map (router)
@@ -85,10 +80,8 @@ map \$host \$upstream {
   default "";
 EOF
 
-# predefined first (cannot be overridden)
 echo "$PREDEFINED_ROUTES" | awk 'NF==2 {printf "  %s %s;\n",$1,$2}' >>"$TMP"
 
-# user routes (additive only, cannot override predefined)
 emit_user_routes | while read -r host upstream; do
   [ -n "${host:-}" ] || continue
   [ -n "${upstream:-}" ] || continue
@@ -147,7 +140,6 @@ server {
   gzip_proxied any;
   gzip_types text/plain text/css text/xml text/javascript application/json application/javascript application/x-javascript application/xml+rss application/vnd.ms-fontobject application/x-font-ttf font/opentype image/svg+xml image/x-icon;
 
-  # REQUIRED when proxy_pass uses a variable
   resolver 127.0.0.11 ipv6=off valid=30s;
   resolver_timeout 2s;
 
@@ -155,7 +147,6 @@ server {
     include /etc/nginx/proxy_params;
     include /etc/nginx/proxy_websocket;
 
-    # Enable streaming only for SSE endpoint(s)
     location = /api/tail {
       include /etc/nginx/proxy_streaming;
       gzip off;
