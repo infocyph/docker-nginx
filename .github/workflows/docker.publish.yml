@@ -103,18 +103,113 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          nginx_alpine_digest="$(docker buildx imagetools inspect nginx:alpine | awk '/^Digest:/ {print $2; exit}')"
-          scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
-          toolset_release="$(gh api repos/infocyph/Toolset/releases/latest --jq .tag_name)"
-          toolset_installer_sha256="$(curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 \
-            https://github.com/infocyph/Toolset/releases/latest/download/install.sh | sha256sum | awk '{print $1}')"
+          retry() {
+            local attempts="$1"
+            shift
+            local attempt=1
 
-          test -n "$nginx_alpine_digest"
-          test -n "$scriptomatic_main"
-          test -n "$toolset_release"
-          test -n "$toolset_installer_sha256"
+            until "$@"; do
+              if (( attempt >= attempts )); then
+                echo "Command failed after ${attempts} attempts: $*" >&2
+                return 1
+              fi
+
+              echo "Attempt ${attempt} failed; retrying in 5 seconds..." >&2
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+          }
+
+          get_nginx_digest() {
+            local output digest
+
+            if ! output="$(docker buildx imagetools inspect nginx:alpine 2>&1)"; then
+              echo "$output" >&2
+              return 1
+            fi
+
+            digest="$(printf '%s\n' "$output" | awk '$1 == "Digest:" { print $2; exit }')"
+            if [[ -z "$digest" ]]; then
+              echo 'nginx:alpine manifest inspection returned no digest.' >&2
+              echo "$output" >&2
+              return 1
+            fi
+
+            printf '%s\n' "$digest"
+          }
+
+          get_scriptomatic_sha() {
+            local output sha
+
+            if ! output="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main 2>&1)"; then
+              echo "$output" >&2
+              return 1
+            fi
+
+            sha="$(printf '%s\n' "$output" | awk 'NF { print $1; exit }')"
+            if [[ -z "$sha" ]]; then
+              echo 'Scriptomatic main lookup returned no SHA.' >&2
+              return 1
+            fi
+
+            printf '%s\n' "$sha"
+          }
+
+          get_toolset_release() {
+            local output
+
+            if ! output="$(gh api repos/infocyph/Toolset/releases/latest --jq '.tag_name // empty' 2>&1)"; then
+              echo "$output" >&2
+              return 1
+            fi
+
+            if [[ -z "$output" ]]; then
+              echo 'Toolset latest release lookup returned no tag.' >&2
+              return 1
+            fi
+
+            printf '%s\n' "$output"
+          }
+
+          get_installer_sha() {
+            local tmp digest
+            tmp="$(mktemp)"
+
+            if ! curl --fail --silent --show-error --location \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 2 \
+              --connect-timeout 15 \
+              --max-time 120 \
+              https://github.com/infocyph/Toolset/releases/latest/download/install.sh \
+              -o "$tmp"; then
+              rm -f "$tmp"
+              return 1
+            fi
+
+            if [[ ! -s "$tmp" ]]; then
+              echo 'Toolset installer download was empty.' >&2
+              rm -f "$tmp"
+              return 1
+            fi
+
+            digest="$(sha256sum "$tmp" | awk '{print $1}')"
+            rm -f "$tmp"
+
+            if [[ -z "$digest" ]]; then
+              echo 'Toolset installer SHA-256 could not be calculated.' >&2
+              return 1
+            fi
+
+            printf '%s\n' "$digest"
+          }
+
+          nginx_alpine_digest="$(retry 5 get_nginx_digest)"
+          scriptomatic_main="$(retry 5 get_scriptomatic_sha)"
+          toolset_release="$(retry 5 get_toolset_release)"
+          toolset_installer_sha256="$(retry 5 get_installer_sha)"
 
           {
             echo "NGINX_ALPINE_DIGEST=$nginx_alpine_digest"
@@ -198,18 +293,130 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
+          set -Eeuo pipefail
 
-          current_nginx_alpine_digest="$(docker buildx imagetools inspect nginx:alpine | awk '/^Digest:/ {print $2; exit}')"
-          current_scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
-          current_toolset_release="$(gh api repos/infocyph/Toolset/releases/latest --jq .tag_name)"
-          current_toolset_installer_sha256="$(curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 \
-            https://github.com/infocyph/Toolset/releases/latest/download/install.sh | sha256sum | awk '{print $1}')"
+          retry() {
+            local attempts="$1"
+            shift
+            local attempt=1
 
-          test "$current_nginx_alpine_digest" = "$NGINX_ALPINE_DIGEST"
-          test "$current_scriptomatic_main" = "$SCRIPTOMATIC_MAIN_SHA"
-          test "$current_toolset_release" = "$TOOLSET_RELEASE"
-          test "$current_toolset_installer_sha256" = "$TOOLSET_INSTALLER_SHA256"
+            until "$@"; do
+              if (( attempt >= attempts )); then
+                echo "Command failed after ${attempts} attempts: $*" >&2
+                return 1
+              fi
+
+              echo "Attempt ${attempt} failed; retrying in 5 seconds..." >&2
+              sleep 5
+              attempt=$((attempt + 1))
+            done
+          }
+
+          get_nginx_digest() {
+            local output digest
+
+            if ! output="$(docker buildx imagetools inspect nginx:alpine 2>&1)"; then
+              echo "$output" >&2
+              return 1
+            fi
+
+            digest="$(printf '%s\n' "$output" | awk '$1 == "Digest:" { print $2; exit }')"
+            if [[ -z "$digest" ]]; then
+              echo 'nginx:alpine manifest inspection returned no digest.' >&2
+              echo "$output" >&2
+              return 1
+            fi
+
+            printf '%s\n' "$digest"
+          }
+
+          get_scriptomatic_sha() {
+            local output sha
+
+            if ! output="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main 2>&1)"; then
+              echo "$output" >&2
+              return 1
+            fi
+
+            sha="$(printf '%s\n' "$output" | awk 'NF { print $1; exit }')"
+            if [[ -z "$sha" ]]; then
+              echo 'Scriptomatic main lookup returned no SHA.' >&2
+              return 1
+            fi
+
+            printf '%s\n' "$sha"
+          }
+
+          get_toolset_release() {
+            local output
+
+            if ! output="$(gh api repos/infocyph/Toolset/releases/latest --jq '.tag_name // empty' 2>&1)"; then
+              echo "$output" >&2
+              return 1
+            fi
+
+            if [[ -z "$output" ]]; then
+              echo 'Toolset latest release lookup returned no tag.' >&2
+              return 1
+            fi
+
+            printf '%s\n' "$output"
+          }
+
+          get_installer_sha() {
+            local tmp digest
+            tmp="$(mktemp)"
+
+            if ! curl --fail --silent --show-error --location \
+              --retry 5 \
+              --retry-all-errors \
+              --retry-delay 2 \
+              --connect-timeout 15 \
+              --max-time 120 \
+              https://github.com/infocyph/Toolset/releases/latest/download/install.sh \
+              -o "$tmp"; then
+              rm -f "$tmp"
+              return 1
+            fi
+
+            if [[ ! -s "$tmp" ]]; then
+              echo 'Toolset installer download was empty.' >&2
+              rm -f "$tmp"
+              return 1
+            fi
+
+            digest="$(sha256sum "$tmp" | awk '{print $1}')"
+            rm -f "$tmp"
+
+            if [[ -z "$digest" ]]; then
+              echo 'Toolset installer SHA-256 could not be calculated.' >&2
+              return 1
+            fi
+
+            printf '%s\n' "$digest"
+          }
+
+          current_nginx_alpine_digest="$(retry 5 get_nginx_digest)"
+          current_scriptomatic_main="$(retry 5 get_scriptomatic_sha)"
+          current_toolset_release="$(retry 5 get_toolset_release)"
+          current_toolset_installer_sha256="$(retry 5 get_installer_sha)"
+
+          if [[ "$current_nginx_alpine_digest" != "$NGINX_ALPINE_DIGEST" ]]; then
+            echo "nginx:alpine changed during release: $NGINX_ALPINE_DIGEST -> $current_nginx_alpine_digest" >&2
+            exit 1
+          fi
+          if [[ "$current_scriptomatic_main" != "$SCRIPTOMATIC_MAIN_SHA" ]]; then
+            echo "Scriptomatic main changed during release: $SCRIPTOMATIC_MAIN_SHA -> $current_scriptomatic_main" >&2
+            exit 1
+          fi
+          if [[ "$current_toolset_release" != "$TOOLSET_RELEASE" ]]; then
+            echo "Toolset latest release changed during release: $TOOLSET_RELEASE -> $current_toolset_release" >&2
+            exit 1
+          fi
+          if [[ "$current_toolset_installer_sha256" != "$TOOLSET_INSTALLER_SHA256" ]]; then
+            echo 'Toolset installer content changed during release.' >&2
+            exit 1
+          fi
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
