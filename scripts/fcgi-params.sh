@@ -20,7 +20,7 @@ ensure_newline_eof() {
     local file="$1" last_byte
 
     [[ -s "$file" ]] || return 0
-    last_byte="$(tail -c 1 "$file" | od -An -tuC | tr -d '[:space:]')"
+    last_byte="$(tail -c 1 "$file" | od -An -t u1 | tr -d '[:space:]')"
     [[ "$last_byte" == "10" ]] || printf '\n' >>"$file"
 }
 
