@@ -5,90 +5,333 @@ on:
     types: [published]
   schedule:
     - cron: '0 0 * * 0'
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
 
 jobs:
-  push_to_registries:
-    name: Push Docker image to Docker Hub and GHCR
+  publish:
+    name: Build, verify and publish Nginx
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
       attestations: write
+      artifact-metadata: write
       id-token: write
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Set RELEASE_TAG environment variable
+      - name: Resolve stable release source
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_RELEASE_TAG: ${{ github.event.release.tag_name }}
+          EVENT_RELEASE_DRAFT: ${{ github.event.release.draft }}
+          EVENT_RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          echo "Fetching latest release tag..."
-          RELEASE_TAG=$(gh release list --limit 1 --json tagName -q '.[0].tagName')
-          if [ -z "$RELEASE_TAG" ]; then
-            echo "No release found. Exiting."
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == 'release' ]]; then
+            if [[ "$EVENT_RELEASE_DRAFT" == 'true' || "$EVENT_RELEASE_PRERELEASE" == 'true' ]]; then
+              echo 'Stable publish workflow refuses draft/prerelease releases.' >&2
+              exit 1
+            fi
+
+            RELEASE_TAG="$EVENT_RELEASE_TAG"
+            PUBLISH_RELEASE_TAG=true
+            VERIFY_TAG="$RELEASE_TAG"
+          else
+            echo 'Scheduled/manual refresh: resolving latest stable published docker-nginx release.'
+            release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest")"
+            RELEASE_TAG="$(jq -r '.tag_name // empty' <<<"$release_json")"
+            release_draft="$(jq -r '.draft' <<<"$release_json")"
+            release_prerelease="$(jq -r '.prerelease' <<<"$release_json")"
+
+            if [[ "$release_draft" != 'false' || "$release_prerelease" != 'false' ]]; then
+              echo 'Latest stable release lookup returned a draft/prerelease source.' >&2
+              exit 1
+            fi
+
+            PUBLISH_RELEASE_TAG=false
+            VERIFY_TAG=latest
+          fi
+
+          if [[ -z "$RELEASE_TAG" ]]; then
+            echo 'No stable published docker-nginx release found.' >&2
             exit 1
           fi
-          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
-          echo "Using release tag: $RELEASE_TAG"
 
-      - name: Set IMAGE_NAME environment variable
-        run: |
-          IMAGE_NAME=$(echo "$GITHUB_REPOSITORY" | cut -d'/' -f2 | sed 's/^docker-//')
-          echo "IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
-          echo "Computed IMAGE_NAME: $IMAGE_NAME"
+          {
+            echo "RELEASE_TAG=$RELEASE_TAG"
+            echo "PUBLISH_RELEASE_TAG=$PUBLISH_RELEASE_TAG"
+            echo "VERIFY_TAG=$VERIFY_TAG"
+          } >> "$GITHUB_ENV"
 
-      - name: Check out the repo at the latest release tag
-        uses: actions/checkout@v4
+          {
+            echo '## Publish resolution'
+            echo
+            echo "- Event: \`$EVENT_NAME\`"
+            echo "- docker-nginx source release: \`$RELEASE_TAG\`"
+            echo "- Publish immutable release tag: \`$PUBLISH_RELEASE_TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check out exact docker-nginx release source
+        uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - name: Capture source revision
+        run: echo "NGINX_SOURCE_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build fresh amd64 release candidate
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          pull: true
+          no-cache: true
+          push: false
+          tags: infocyph/nginx:publish-candidate
+          cache-to: type=gha,scope=publish-candidate-amd64,mode=max
+
+      - name: Record candidate upstream resolution
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE: infocyph/nginx:publish-candidate
+        run: |
+          set -euo pipefail
+
+          nginx_version="$(docker run --rm --entrypoint sh "$IMAGE" -ec 'nginx -v 2>&1' | sed 's#^nginx version: nginx/##')"
+          alpine_version="$(docker run --rm --entrypoint cat "$IMAGE" /etc/alpine-release)"
+          chromacat_version="$(docker run --rm --entrypoint chromacat "$IMAGE" --version | head -n 1)"
+          banner_sha256="$(docker run --rm --entrypoint sha256sum "$IMAGE" /usr/local/bin/show-banner | awk '{print $1}')"
+          scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
+          toolset_release="$(gh api repos/infocyph/Toolset/releases/latest --jq .tag_name)"
+
+          test -n "$nginx_version"
+          test -n "$alpine_version"
+          test -n "$chromacat_version"
+          test -n "$banner_sha256"
+          test -n "$scriptomatic_main"
+          test -n "$toolset_release"
+
+          {
+            echo "CANDIDATE_NGINX_VERSION=$nginx_version"
+            echo "CANDIDATE_ALPINE_VERSION=$alpine_version"
+            echo "CANDIDATE_CHROMACAT_VERSION=$chromacat_version"
+            echo "CANDIDATE_BANNER_SHA256=$banner_sha256"
+            echo "SCRIPTOMATIC_MAIN_SHA=$scriptomatic_main"
+            echo "TOOLSET_RELEASE=$toolset_release"
+          } >> "$GITHUB_ENV"
+
+          {
+            echo '## Candidate upstream resolution'
+            echo
+            echo "- Nginx: \`$nginx_version\`"
+            echo "- Alpine: \`$alpine_version\`"
+            echo "- chromacat: \`$chromacat_version\`"
+            echo "- Toolset latest release: \`$toolset_release\`"
+            echo "- Scriptomatic main: \`$scriptomatic_main\`"
+            echo "- Installed banner SHA-256: \`$banner_sha256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Final amd64 release-candidate gate
+        run: bash tests/release-gate.sh infocyph/nginx:publish-candidate
+
+      - name: Build fresh arm64 release candidate
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          pull: true
+          no-cache: true
+          push: false
+          tags: infocyph/nginx:publish-candidate-arm64
+          cache-to: type=gha,scope=publish-candidate-arm64,mode=max
+
+      - name: Final arm64 release-candidate gate
+        run: |
+          set -euo pipefail
+          test "$(docker run --rm --platform linux/arm64 --entrypoint uname infocyph/nginx:publish-candidate-arm64 -m)" = 'aarch64'
+          docker run --rm --platform linux/arm64 --entrypoint nginx infocyph/nginx:publish-candidate-arm64 -v
+          docker run --rm --platform linux/arm64 --entrypoint chromacat infocyph/nginx:publish-candidate-arm64 --version
+          bash tests/image-smoke.sh infocyph/nginx:publish-candidate-arm64
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: docker.io
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Log in to GitHub Container Registry (GHCR)
-        uses: docker/login-action@v3
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
 
-      - name: Extract metadata (tags, labels) for Docker
+      - name: Enforce immutable release tags
+        if: env.PUBLISH_RELEASE_TAG == 'true'
+        env:
+          VERSION_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+
+          assert_absent() {
+            local image="$1" output
+
+            if output="$(docker buildx imagetools inspect "$image" 2>&1)"; then
+              echo "Refusing to overwrite immutable release tag: $image" >&2
+              return 1
+            fi
+
+            case "$output" in
+              *'not found'*|*'manifest unknown'*|*'NAME_UNKNOWN'*) return 0 ;;
+              *)
+                echo "Could not safely verify release-tag absence for $image:" >&2
+                echo "$output" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          assert_absent "docker.io/infocyph/nginx:${VERSION_TAG}"
+          assert_absent "ghcr.io/infocyph/nginx:${VERSION_TAG}"
+
+      - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
-            docker.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+            docker.io/infocyph/nginx
+            ghcr.io/infocyph/nginx
+          flavor: |
+            latest=false
           tags: |
-            ${{ env.RELEASE_TAG }}
-            latest
+            type=raw,value=${{ env.RELEASE_TAG }},enable=${{ env.PUBLISH_RELEASE_TAG == 'true' }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.NGINX_SOURCE_SHA }}
+            org.opencontainers.image.version=${{ env.RELEASE_TAG }}
 
-      - name: Build and push Docker images
+      - name: Build and push multi-architecture image
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
+          pull: true
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: |
+            type=gha,scope=publish-candidate-amd64
+            type=gha,scope=publish-candidate-arm64
+          cache-to: type=gha,scope=publish-multiarch,mode=max
+          provenance: mode=max
+          sbom: true
 
-      - name: Generate artifact attestation for Docker Hub
-        uses: actions/attest-build-provenance@v2
+      - name: Generate Docker Hub provenance attestation
+        uses: actions/attest@v4
         with:
-          subject-name: docker.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          subject-name: docker.io/infocyph/nginx
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-          github-token: ${{ github.token }}
 
-      - name: Generate artifact attestation for GHCR
-        uses: actions/attest-build-provenance@v2
+      - name: Generate GHCR provenance attestation
+        uses: actions/attest@v4
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          subject-name: ghcr.io/infocyph/nginx
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-          github-token: ${{ github.token }}
+
+      - name: Verify published manifests and runtime
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          resolve_digest() {
+            local ref="$1" output digest attempt
+
+            for attempt in $(seq 1 12); do
+              if output="$(docker buildx imagetools inspect "$ref" 2>&1)"; then
+                digest="$(printf '%s\n' "$output" | awk '/^Digest:/ {print $2; exit}')"
+                if [[ -n "$digest" ]]; then
+                  printf '%s\n' "$digest"
+                  return 0
+                fi
+              fi
+              sleep 5
+            done
+
+            echo "Unable to resolve published digest for $ref" >&2
+            [[ -z "${output:-}" ]] || echo "$output" >&2
+            return 1
+          }
+
+          docker_ref="docker.io/infocyph/nginx:${VERIFY_TAG}"
+          ghcr_ref="ghcr.io/infocyph/nginx:${VERIFY_TAG}"
+          docker_digest="$(resolve_digest "$docker_ref")"
+          ghcr_digest="$(resolve_digest "$ghcr_ref")"
+
+          test "$docker_digest" = "$DIGEST"
+          test "$ghcr_digest" = "$DIGEST"
+
+          manifest="$(docker buildx imagetools inspect "$ghcr_ref")"
+          printf '%s\n' "$manifest" | grep -Fq 'linux/amd64'
+          printf '%s\n' "$manifest" | grep -Fq 'linux/arm64'
+
+          image="ghcr.io/infocyph/nginx@${DIGEST}"
+          docker pull --platform linux/amd64 "$image" >/dev/null
+          bash tests/image-smoke.sh "$image"
+
+          published_nginx="$(docker run --rm --platform linux/amd64 --entrypoint sh "$image" -ec 'nginx -v 2>&1' | sed 's#^nginx version: nginx/##')"
+          published_alpine="$(docker run --rm --platform linux/amd64 --entrypoint cat "$image" /etc/alpine-release)"
+          published_chromacat="$(docker run --rm --platform linux/amd64 --entrypoint chromacat "$image" --version | head -n 1)"
+          published_banner_sha256="$(docker run --rm --platform linux/amd64 --entrypoint sha256sum "$image" /usr/local/bin/show-banner | awk '{print $1}')"
+
+          test "$published_nginx" = "$CANDIDATE_NGINX_VERSION"
+          test "$published_alpine" = "$CANDIDATE_ALPINE_VERSION"
+          test "$published_chromacat" = "$CANDIDATE_CHROMACAT_VERSION"
+          test "$published_banner_sha256" = "$CANDIDATE_BANNER_SHA256"
+
+          {
+            echo '## Published Nginx image'
+            echo
+            echo "- Source tag: \`$RELEASE_TAG\`"
+            echo "- Source revision: \`$NGINX_SOURCE_SHA\`"
+            echo "- Manifest digest: \`$DIGEST\`"
+            echo "- Docker Hub digest: \`$docker_digest\`"
+            echo "- GHCR digest: \`$ghcr_digest\`"
+            echo "- Platforms: \`linux/amd64\`, \`linux/arm64\`"
+            echo "- Published amd64 Nginx: \`$published_nginx\`"
+            echo "- Published amd64 Alpine: \`$published_alpine\`"
+            echo "- Published amd64 chromacat: \`$published_chromacat\`"
+            echo "- Scriptomatic main at candidate build: \`$SCRIPTOMATIC_MAIN_SHA\`"
+            echo "- Toolset release at candidate build: \`$TOOLSET_RELEASE\`"
+            echo "- Published amd64 banner SHA-256: \`$published_banner_sha256\`"
+            echo "- BuildKit provenance: enabled (\`mode=max\`)"
+            echo '- BuildKit SBOM: enabled'
+            echo '- GitHub/Sigstore provenance attestations: Docker Hub + GHCR'
+          } >> "$GITHUB_STEP_SUMMARY"
