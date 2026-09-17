@@ -41,7 +41,7 @@ for needle in \
   'AUTO_RESTORE_INTERVAL_SECONDS' \
   'nginx-healthcheck' \
   'Release tags are immutable' \
-  'updates only `latest`'; do
+  'update only `latest`'; do
   require_file_text "$readme" "$needle"
 done
 
