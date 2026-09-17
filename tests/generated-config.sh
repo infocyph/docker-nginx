@@ -43,6 +43,19 @@ docker run --rm --entrypoint sh "$image" -ec '
     test "$matches" -eq 1
   done
 
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_REAL_IP[[:space:]]+\\\$remote_addr;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_FORWARDED_FOR[[:space:]]+\\\$proxy_add_x_forwarded_for;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_FORWARDED_PROTO[[:space:]]+\\\$scheme;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_FORWARDED_HOST[[:space:]]+\\\$host;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_FORWARDED_PORT[[:space:]]+\\\$server_port;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_REQUEST_ID[[:space:]]+\\\$request_id;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+REMOTE_ADDR[[:space:]]+\\\$remote_addr;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+REQUEST_SCHEME[[:space:]]+\\\$scheme;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+SERVER_PORT[[:space:]]+\\\$server_port;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_HOST[[:space:]]+\\\$host;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTPS[[:space:]]+\\\$https([[:space:]]+if_not_empty)?;" /etc/nginx/fastcgi_params
+  grep -Eq "^[[:space:]]*fastcgi_param[[:space:]]+HTTP_X_FORWARDED_SSL[[:space:]]+\\\$https;" /etc/nginx/fastcgi_params
+
   render-locals
   grep -Fq '"'"'""      "";'"'"' /etc/nginx/locals.conf
 '
