@@ -1,6 +1,6 @@
 FROM nginx:alpine
 LABEL org.opencontainers.image.source="https://github.com/infocyph/docker-nginx"
-LABEL org.opencontainers.image.description="NGINX with updated params"
+LABEL org.opencontainers.image.description="Hardened LocalDevStack Nginx edge proxy with TLS, local routing and streaming support"
 LABEL org.opencontainers.image.licenses="MIT"
 LABEL org.opencontainers.image.authors="infocyph,abmmhasan"
 
