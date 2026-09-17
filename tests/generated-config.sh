@@ -17,8 +17,15 @@ docker run --rm --entrypoint sh "$image" -ec '
   test -x /usr/local/bin/nginx-healthcheck
   test ! -e /usr/local/bin/fcgi_params.sh
   test ! -e /usr/local/bin/proxy_params.sh
+
   count="$(grep -Fc "include /etc/nginx/locals.conf;" /etc/nginx/nginx.conf)"
   test "$count" -eq 1
+  locals_line="$(grep -nF "include /etc/nginx/locals.conf;" /etc/nginx/nginx.conf | cut -d: -f1)"
+  conf_d_line="$(grep -nE "^[[:space:]]*include[[:space:]]+/etc/nginx/conf\\.d/\\*\\.conf;[[:space:]]*$" /etc/nginx/nginx.conf | head -n 1 | cut -d: -f1)"
+  test -n "$locals_line"
+  test -n "$conf_d_line"
+  test "$locals_line" -lt "$conf_d_line"
+
   chromacat --version >/dev/null
   bash -n /usr/local/bin/show-banner
 
@@ -58,6 +65,10 @@ docker run --rm --entrypoint sh "$image" -ec '
 
   render-locals
   grep -Fq '"'"'""      "";'"'"' /etc/nginx/locals.conf
+  grep -Fq "ssl_protocols TLSv1.2 TLSv1.3;" /etc/nginx/locals.conf
+  grep -Fq "ssl_ciphers \"ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-CHACHA20-POLY1305\";" /etc/nginx/locals.conf
+  ! grep -Fq "TLS_AES_" /etc/nginx/locals.conf
+  ! grep -Fq "AES256-SHA:AES128-SHA" /etc/nginx/locals.conf
 '
 
 printf 'Generated config contracts passed.\n'
