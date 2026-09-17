@@ -99,6 +99,30 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
+      - name: Snapshot rolling upstream inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          nginx_alpine_digest="$(docker buildx imagetools inspect nginx:alpine | awk '/^Digest:/ {print $2; exit}')"
+          scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
+          toolset_release="$(gh api repos/infocyph/Toolset/releases/latest --jq .tag_name)"
+          toolset_installer_sha256="$(curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 \
+            https://github.com/infocyph/Toolset/releases/latest/download/install.sh | sha256sum | awk '{print $1}')"
+
+          test -n "$nginx_alpine_digest"
+          test -n "$scriptomatic_main"
+          test -n "$toolset_release"
+          test -n "$toolset_installer_sha256"
+
+          {
+            echo "NGINX_ALPINE_DIGEST=$nginx_alpine_digest"
+            echo "SCRIPTOMATIC_MAIN_SHA=$scriptomatic_main"
+            echo "TOOLSET_RELEASE=$toolset_release"
+            echo "TOOLSET_INSTALLER_SHA256=$toolset_installer_sha256"
+          } >> "$GITHUB_ENV"
+
       - name: Build fresh amd64 release candidate
         uses: docker/build-push-action@v7
         with:
@@ -113,7 +137,6 @@ jobs:
 
       - name: Record candidate upstream resolution
         env:
-          GH_TOKEN: ${{ github.token }}
           IMAGE: infocyph/nginx:publish-candidate
         run: |
           set -euo pipefail
@@ -122,23 +145,17 @@ jobs:
           alpine_version="$(docker run --rm --entrypoint cat "$IMAGE" /etc/alpine-release)"
           chromacat_version="$(docker run --rm --entrypoint chromacat "$IMAGE" --version | head -n 1)"
           banner_sha256="$(docker run --rm --entrypoint sha256sum "$IMAGE" /usr/local/bin/show-banner | awk '{print $1}')"
-          scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
-          toolset_release="$(gh api repos/infocyph/Toolset/releases/latest --jq .tag_name)"
 
           test -n "$nginx_version"
           test -n "$alpine_version"
           test -n "$chromacat_version"
           test -n "$banner_sha256"
-          test -n "$scriptomatic_main"
-          test -n "$toolset_release"
 
           {
             echo "CANDIDATE_NGINX_VERSION=$nginx_version"
             echo "CANDIDATE_ALPINE_VERSION=$alpine_version"
             echo "CANDIDATE_CHROMACAT_VERSION=$chromacat_version"
             echo "CANDIDATE_BANNER_SHA256=$banner_sha256"
-            echo "SCRIPTOMATIC_MAIN_SHA=$scriptomatic_main"
-            echo "TOOLSET_RELEASE=$toolset_release"
           } >> "$GITHUB_ENV"
 
           {
@@ -147,8 +164,10 @@ jobs:
             echo "- Nginx: \`$nginx_version\`"
             echo "- Alpine: \`$alpine_version\`"
             echo "- chromacat: \`$chromacat_version\`"
-            echo "- Toolset latest release: \`$toolset_release\`"
-            echo "- Scriptomatic main: \`$scriptomatic_main\`"
+            echo "- nginx:alpine index digest: \`$NGINX_ALPINE_DIGEST\`"
+            echo "- Toolset latest release: \`$TOOLSET_RELEASE\`"
+            echo "- Toolset installer SHA-256: \`$TOOLSET_INSTALLER_SHA256\`"
+            echo "- Scriptomatic main: \`$SCRIPTOMATIC_MAIN_SHA\`"
             echo "- Installed banner SHA-256: \`$banner_sha256\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -174,6 +193,23 @@ jobs:
           docker run --rm --platform linux/arm64 --entrypoint nginx infocyph/nginx:publish-candidate-arm64 -v
           docker run --rm --platform linux/arm64 --entrypoint chromacat infocyph/nginx:publish-candidate-arm64 --version
           bash tests/image-smoke.sh infocyph/nginx:publish-candidate-arm64
+
+      - name: Revalidate rolling upstreams before publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          current_nginx_alpine_digest="$(docker buildx imagetools inspect nginx:alpine | awk '/^Digest:/ {print $2; exit}')"
+          current_scriptomatic_main="$(git ls-remote https://github.com/infocyph/Scriptomatic.git refs/heads/main | awk '{print $1}')"
+          current_toolset_release="$(gh api repos/infocyph/Toolset/releases/latest --jq .tag_name)"
+          current_toolset_installer_sha256="$(curl -fsSL --retry 3 --retry-delay 1 --connect-timeout 10 \
+            https://github.com/infocyph/Toolset/releases/latest/download/install.sh | sha256sum | awk '{print $1}')"
+
+          test "$current_nginx_alpine_digest" = "$NGINX_ALPINE_DIGEST"
+          test "$current_scriptomatic_main" = "$SCRIPTOMATIC_MAIN_SHA"
+          test "$current_toolset_release" = "$TOOLSET_RELEASE"
+          test "$current_toolset_installer_sha256" = "$TOOLSET_INSTALLER_SHA256"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -240,7 +276,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          pull: true
+          pull: false
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -328,8 +364,10 @@ jobs:
             echo "- Published amd64 Nginx: \`$published_nginx\`"
             echo "- Published amd64 Alpine: \`$published_alpine\`"
             echo "- Published amd64 chromacat: \`$published_chromacat\`"
+            echo "- nginx:alpine index digest at candidate build: \`$NGINX_ALPINE_DIGEST\`"
             echo "- Scriptomatic main at candidate build: \`$SCRIPTOMATIC_MAIN_SHA\`"
             echo "- Toolset release at candidate build: \`$TOOLSET_RELEASE\`"
+            echo "- Toolset installer SHA-256: \`$TOOLSET_INSTALLER_SHA256\`"
             echo "- Published amd64 banner SHA-256: \`$published_banner_sha256\`"
             echo "- BuildKit provenance: enabled (\`mode=max\`)"
             echo '- BuildKit SBOM: enabled'
