@@ -28,16 +28,16 @@ docker run --rm \
 
     grep -Fq "listen 80 default_server;" /etc/nginx/locals.conf
     grep -Fq "listen 443 ssl default_server;" /etc/nginx/locals.conf
-    grep -Fq "proxy_set_header Host $host;" /etc/nginx/locals.conf
+    grep -Fq "proxy_set_header Host \$host;" /etc/nginx/locals.conf
     grep -Fq "include /etc/nginx/proxy_timeouts;" /etc/nginx/locals.conf
     grep -Fq "location = /api/tail" /etc/nginx/locals.conf
     grep -Fq "server_name llm.localhost;" /etc/nginx/locals.conf
-    grep -Fq "set $llm_upstream \"llm-sm:11434\";" /etc/nginx/locals.conf
+    grep -Fq "set \$llm_upstream \"llm-sm:11434\";" /etc/nginx/locals.conf
     grep -Fq "resolver 127.0.0.11 ipv6=off valid=5s;" /etc/nginx/locals.conf
     grep -Fq "proxy_buffering off;" /etc/nginx/proxy_streaming
     grep -Fq "proxy_request_buffering off;" /etc/nginx/proxy_streaming
     grep -Fq "client_max_body_size 10G;" /etc/nginx/locals.conf
-    ! grep -Fq "map $http_host $log_host" /etc/nginx/locals.conf
+    ! grep -Fq "map \$http_host \$log_host" /etc/nginx/locals.conf
   '
 
 docker run --rm \
