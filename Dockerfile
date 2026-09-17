@@ -60,6 +60,11 @@ RUN set -eux; \
 ' "$NGINX_CONF"; \
     fi; \
     test "$(grep -Fc 'include /etc/nginx/locals.conf;' "$NGINX_CONF")" -eq 1; \
+    locals_line="$(grep -nF 'include /etc/nginx/locals.conf;' "$NGINX_CONF" | cut -d: -f1)"; \
+    conf_d_line="$(grep -nE '^[[:space:]]*include[[:space:]]+/etc/nginx/conf\.d/\*\.conf;[[:space:]]*$' "$NGINX_CONF" | head -n 1 | cut -d: -f1)"; \
+    test -n "$locals_line"; \
+    test -n "$conf_d_line"; \
+    test "$locals_line" -lt "$conf_d_line"; \
     test -f /etc/nginx/locals.conf || : > /etc/nginx/locals.conf; \
     /usr/local/bin/fcgi_params.sh; \
     sha256sum /etc/nginx/fastcgi_params /etc/nginx/fastcgi_streaming > /tmp/fcgi.sha256; \
