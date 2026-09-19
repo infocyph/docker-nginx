@@ -29,8 +29,8 @@ for needle in \
   'ri.localhost' \
   'me.localhost' \
   'kibana.localhost' \
-  'llm.localhost' \
-  'llm-sm:11434' \
+  'llm-ollama.localhost' \
+  'llm-ollama:11434' \
   'LOCALHOST_ROUTES' \
   'LOCALHOST_CLIENT_MAX_BODY_SIZE' \
   'AUTO_DISABLE_INVALID_CONFS' \
