@@ -107,7 +107,7 @@ https://llm.localhost/api/version
 https://llm.localhost/v1/...
 ```
 
-The LLM proxy uses HTTP/1.1 streaming with proxy/request buffering disabled, gzip disabled, long development-friendly timeouts, and Docker DNS re-resolution. Nginx starts normally when `llm-sm` is absent; if the service starts later, the existing Nginx instance can resolve it without a rebuild or restart.
+The LLM proxy uses HTTP/1.1 streaming with proxy/request buffering disabled, gzip disabled, Docker DNS re-resolution, and a dedicated long-running request budget. `LLM_PROXY_TIMEOUT_SECONDS` defaults to `1800` (30 minutes) and controls only the LLM route's proxy send/read timeouts; normal reverse-proxy routes keep the generic `600s` development timeout. Valid values are `1..3600` seconds. Nginx starts normally when `llm-sm` is absent; if the service starts later, the existing Nginx instance can resolve it without a rebuild or restart.
 
 No wildcard CORS policy is added here. Browser-origin policy belongs to the LLM/Ollama runtime contract.
 
