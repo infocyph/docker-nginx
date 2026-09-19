@@ -24,14 +24,17 @@ Release tags are immutable. `latest` is rebuilt weekly and on manual refresh fro
 
 ## Ports
 
-Only the HTTP/TLS edge ports are exposed:
+The image exposes the standard HTTP/TLS edge ports plus the native Ollama proxy listener:
 
 ```text
 80
 443
+11434
 ```
 
-Ollama port `11434` is never exposed by this image. Optional direct access such as `127.0.0.1:11434` belongs to the LocalDevStack/`llm-ollama` Compose service.
+Port `11434` is an Nginx listener that proxies to `llm-ollama:11434`; it is not the
+provider container itself. LocalDevStack publishes this listener loopback-only as
+`127.0.0.1:11434:11434` so the native Ollama API is not exposed to the LAN.
 
 ## Required LocalDevStack mounts
 
@@ -91,7 +94,8 @@ Supported suffixes are standard Nginx size units accepted by the renderer (`K`, 
 
 ## Local LLM endpoint
 
-`llm-ollama.localhost` has a dedicated TLS proxy instead of sharing the normal buffered convenience proxy. It routes to the optional Docker service:
+`llm-ollama.localhost` has dedicated HTTPS and native HTTP proxy listeners instead of
+sharing the normal buffered convenience proxy. Both route to the optional Docker service:
 
 ```text
 llm-ollama:11434
@@ -101,10 +105,12 @@ Examples:
 
 ```text
 https://llm-ollama.localhost/api/chat
-https://llm-ollama.localhost/api/generate
-https://llm-ollama.localhost/api/tags
-https://llm-ollama.localhost/api/version
 https://llm-ollama.localhost/v1/...
+
+http://llm-ollama.localhost:11434/api/generate
+http://llm-ollama.localhost:11434/api/tags
+http://llm-ollama.localhost:11434/api/version
+http://llm-ollama.localhost:11434/v1/...
 ```
 
 The LLM proxy uses HTTP/1.1 streaming with proxy/request buffering disabled, gzip disabled, Docker DNS re-resolution, and a dedicated long-running request budget. `LLM_PROXY_TIMEOUT_SECONDS` defaults to `1800` (30 minutes) and controls only the LLM route's proxy send/read timeouts; normal reverse-proxy routes keep the generic `600s` development timeout. Valid values are `1..3600` seconds. Nginx starts normally when `llm-ollama` is absent; if the service starts later, the existing Nginx instance can resolve it without a rebuild or restart.
