@@ -105,7 +105,7 @@ RUN set -eux; \
     apk del .fetch-deps; \
     nginx -t
 
-EXPOSE 80 443
+EXPOSE 80 443 11434
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 CMD ["nginx-healthcheck"]
 ENTRYPOINT ["nginx-entrypoint"]
