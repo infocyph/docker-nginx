@@ -5,8 +5,8 @@ OUT="/etc/nginx/locals.conf"
 LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
 LOCALHOST_CLIENT_MAX_BODY_SIZE="${LOCALHOST_CLIENT_MAX_BODY_SIZE:-10G}"
 LLM_PROXY_TIMEOUT_SECONDS="${LLM_PROXY_TIMEOUT_SECONDS:-1800}"
-LLM_HOST="llm.localhost"
-LLM_UPSTREAM="llm-sm:11434"
+LLM_HOST="llm-ollama.localhost"
+LLM_UPSTREAM="llm-ollama:11434"
 
 PREDEFINED_ROUTES="
 admin.localhost server-tools:9911
@@ -248,7 +248,38 @@ server {
   }
 }
 
-# Dedicated Ollama/OpenAI-compatible route. llm-sm is optional and therefore
+# Native Ollama/OpenAI-compatible HTTP route. LocalDevStack publishes this
+# listener loopback-only on the host; llm-ollama itself remains internal.
+server {
+  listen 11434;
+  server_name ${LLM_HOST} localhost 127.0.0.1;
+
+  client_max_body_size ${LOCALHOST_CLIENT_MAX_BODY_SIZE};
+  client_body_timeout 300s;
+
+  access_log /var/log/nginx/localhost.access.log;
+  error_log  /var/log/nginx/localhost.error.log warn;
+
+  resolver 127.0.0.11 ipv6=off valid=5s;
+  resolver_timeout 2s;
+  set \$llm_upstream "${LLM_UPSTREAM}";
+
+  location / {
+    include /etc/nginx/proxy_params;
+    proxy_connect_timeout 10s;
+    proxy_send_timeout    ${LLM_PROXY_TIMEOUT_SECONDS}s;
+    proxy_read_timeout    ${LLM_PROXY_TIMEOUT_SECONDS}s;
+    include /etc/nginx/proxy_streaming;
+    proxy_http_version 1.1;
+    proxy_set_header Host \$host;
+    proxy_set_header Connection "";
+    gzip off;
+    proxy_pass http://\$llm_upstream;
+    proxy_redirect off;
+  }
+}
+
+# Dedicated HTTPS Ollama/OpenAI-compatible route. llm-ollama is optional and therefore
 # resolved lazily by Docker DNS at request time instead of during Nginx startup.
 server {
   listen 443 ssl;

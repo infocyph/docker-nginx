@@ -30,10 +30,10 @@ assert_streams() {
   local path="$1" payload="$2" out="$3" pid seen
 
   curl -skN --http1.1 \
-    --resolve "llm.localhost:${https_port}:127.0.0.1" \
+    --resolve "llm-ollama.localhost:${https_port}:127.0.0.1" \
     -H 'Content-Type: application/json' \
     --data "$payload" \
-    "https://llm.localhost:${https_port}${path}" >"$out" &
+    "https://llm-ollama.localhost:${https_port}${path}" >"$out" &
   pid=$!
 
   seen=0
@@ -62,8 +62,8 @@ assert_streams() {
   fi
 
   grep -Fq "\"path\":\"${path}\"" "$out"
-  grep -Fq '"host":"llm.localhost"' "$out"
-  grep -Fq '"forwarded_host":"llm.localhost"' "$out"
+  grep -Fq '"host":"llm-ollama.localhost"' "$out"
+  grep -Fq '"forwarded_host":"llm-ollama.localhost"' "$out"
   grep -Fq '"forwarded_proto":"https"' "$out"
   grep -Fq '"forwarded_port":"443"' "$out"
   grep -Fq '"request_id_present":true' "$out"
@@ -73,6 +73,7 @@ assert_streams() {
 
 http_port="$(free_port)"
 https_port="$(free_port)"
+native_port="$(free_port)"
 mkdir -p "$tmp/mkcert" "$tmp/rootca"
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
   -subj '/CN=localhost' \
@@ -88,7 +89,8 @@ docker run -d \
   --network "$network" \
   -p "127.0.0.1:${http_port}:80" \
   -p "127.0.0.1:${https_port}:443" \
-  -e LOCALHOST_ROUTES='llm.localhost=evil:9999' \
+  -p "127.0.0.1:${native_port}:11434" \
+  -e LOCALHOST_ROUTES='llm-ollama.localhost=evil:9999' \
   -e LLM_PROXY_TIMEOUT_SECONDS=7 \
   -v "$tmp/mkcert:/etc/mkcert:ro" \
   -v "$tmp/rootca:/etc/share/rootCA:ro" \
@@ -104,25 +106,30 @@ done
 
 docker exec "$proxy" grep -Fq 'proxy_send_timeout    7s;' /etc/nginx/locals.conf
 docker exec "$proxy" grep -Fq 'proxy_read_timeout    7s;' /etc/nginx/locals.conf
-llm_block="$(docker exec "$proxy" awk '/server_name llm\.localhost;/{capture=1} capture{print} capture && /^}/{exit}' /etc/nginx/locals.conf)"
+llm_block="$(docker exec "$proxy" awk '/server_name llm-ollama\.localhost;/{capture=1} capture{print} capture && /^}/{exit}' /etc/nginx/locals.conf)"
 if grep -Fq 'include /etc/nginx/proxy_timeouts;' <<<"$llm_block"; then
   echo 'LLM route unexpectedly inherited the generic proxy_timeouts include.' >&2
   exit 1
 fi
 
-headers="$(curl -sS -D - -o /dev/null -H 'Host: llm.localhost' "http://127.0.0.1:${http_port}/api/tags")"
+headers="$(curl -sS -D - -o /dev/null -H 'Host: llm-ollama.localhost' "http://127.0.0.1:${http_port}/api/tags")"
 printf '%s\n' "$headers" | grep -Eq '^HTTP/1\.[01] 301'
-printf '%s\n' "$headers" | grep -Fiq 'location: https://llm.localhost/api/tags'
+printf '%s\n' "$headers" | grep -Fiq 'location: https://llm-ollama.localhost/api/tags'
 
 missing_code="$(curl -skS --max-time 6 -o /dev/null -w '%{http_code}' \
-  --resolve "llm.localhost:${https_port}:127.0.0.1" \
-  "https://llm.localhost:${https_port}/api/tags" || true)"
+  --resolve "llm-ollama.localhost:${https_port}:127.0.0.1" \
+  "https://llm-ollama.localhost:${https_port}/api/tags" || true)"
 [ "$missing_code" = 502 ]
+
+native_missing_code="$(curl -sS --max-time 6 -o /dev/null -w '%{http_code}' \
+  -H 'Host: llm-ollama.localhost' \
+  "http://127.0.0.1:${native_port}/api/tags" || true)"
+[ "$native_missing_code" = 502 ]
 
 docker run -d \
   --name "$mock" \
   --network "$network" \
-  --network-alias llm-sm \
+  --network-alias llm-ollama \
   -e PORT=11434 \
   -e STREAM_DELAY_SECONDS=3 \
   -v "$fixture:/server.py:ro" \
@@ -131,8 +138,8 @@ docker run -d \
 ready=0
 for _ in $(seq 1 20); do
   code="$(curl -skS --max-time 5 -o "$tmp/tags.json" -w '%{http_code}' \
-    --resolve "llm.localhost:${https_port}:127.0.0.1" \
-    "https://llm.localhost:${https_port}/api/tags" || true)"
+    --resolve "llm-ollama.localhost:${https_port}:127.0.0.1" \
+    "https://llm-ollama.localhost:${https_port}/api/tags" || true)"
   if [ "$code" = 200 ]; then
     ready=1
     break
@@ -142,13 +149,28 @@ done
 [ "$ready" -eq 1 ]
 grep -Fq '"name":"mock:latest"' "$tmp/tags.json"
 
+native_tags="$(curl -sS --max-time 5 \
+  -H 'Host: llm-ollama.localhost' \
+  "http://127.0.0.1:${native_port}/api/tags")"
+printf '%s' "$native_tags" | grep -Fq '"name":"mock:latest"'
+
 version="$(curl -skS \
-  --resolve "llm.localhost:${https_port}:127.0.0.1" \
-  "https://llm.localhost:${https_port}/api/version")"
+  --resolve "llm-ollama.localhost:${https_port}:127.0.0.1" \
+  "https://llm-ollama.localhost:${https_port}/api/version")"
 printf '%s' "$version" | grep -Fq '"version":"mock"'
 
 assert_streams '/api/chat' '{"model":"mock","messages":[{"role":"user","content":"hello"}]}' "$tmp/chat.out"
 assert_streams '/api/generate' '{"model":"mock","prompt":"hello"}' "$tmp/generate.out"
 assert_streams '/v1/chat/completions' '{"model":"mock","messages":[{"role":"user","content":"hello"}],"stream":true}' "$tmp/v1.out"
 
-printf 'LLM route streaming and late-start DNS recovery smoke passed.\n'
+native_generate="$(curl -sS --http1.1 --max-time 10 \
+  -H 'Host: llm-ollama.localhost' \
+  -H 'Content-Type: application/json' \
+  --data '{"model":"mock","prompt":"hello"}' \
+  "http://127.0.0.1:${native_port}/api/generate")"
+printf '%s' "$native_generate" | grep -Fq '"chunk":1'
+printf '%s' "$native_generate" | grep -Fq '"chunk":2'
+printf '%s' "$native_generate" | grep -Fq '"forwarded_proto":"http"'
+printf '%s' "$native_generate" | grep -Fq '"forwarded_port":"11434"'
+
+printf 'LLM HTTPS and native-port streaming/DNS recovery smoke passed.\n'

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 image="${1:-infocyph/nginx:ci}"
-routes='valid.localhost=svc-name:8080,admin.localhost=evil:1,llm.localhost=evil-llm:9999,bad..localhost=bad:80,outside.test=bad:80,-bad.localhost=bad:80,bad-.localhost=bad:80,zero.localhost=svc:0,high.localhost=svc:65536,dup.localhost=first:1000,dup.localhost=second:2000,under.localhost=svc_name:8081'
+routes='valid.localhost=svc-name:8080,admin.localhost=evil:1,llm-ollama.localhost=evil-llm:9999,bad..localhost=bad:80,outside.test=bad:80,-bad.localhost=bad:80,bad-.localhost=bad:80,zero.localhost=svc:0,high.localhost=svc:65536,dup.localhost=first:1000,dup.localhost=second:2000,under.localhost=svc_name:8081'
 
 docker run --rm \
   --entrypoint sh \
@@ -12,7 +12,7 @@ docker run --rm \
 
     grep -Fq "  valid.localhost svc-name:8080;" /etc/nginx/locals.conf
     grep -Fq "  admin.localhost server-tools:9911;" /etc/nginx/locals.conf
-    grep -Fq "  llm.localhost llm-sm:11434;" /etc/nginx/locals.conf
+    grep -Fq "  llm-ollama.localhost llm-ollama:11434;" /etc/nginx/locals.conf
     grep -Fq "  dup.localhost first:1000;" /etc/nginx/locals.conf
     grep -Fq "  under.localhost svc_name:8081;" /etc/nginx/locals.conf
 
@@ -31,8 +31,10 @@ docker run --rm \
     grep -Fq "proxy_set_header Host \$host;" /etc/nginx/locals.conf
     grep -Fq "include /etc/nginx/proxy_timeouts;" /etc/nginx/locals.conf
     grep -Fq "location = /api/tail" /etc/nginx/locals.conf
-    grep -Fq "server_name llm.localhost;" /etc/nginx/locals.conf
-    grep -Fq "set \$llm_upstream \"llm-sm:11434\";" /etc/nginx/locals.conf
+    grep -Fq "server_name llm-ollama.localhost;" /etc/nginx/locals.conf
+    grep -Fq "set \$llm_upstream \"llm-ollama:11434\";" /etc/nginx/locals.conf
+    grep -Fq "listen 11434;" /etc/nginx/locals.conf
+    grep -Fq "server_name llm-ollama.localhost localhost 127.0.0.1;" /etc/nginx/locals.conf
     grep -Fq "resolver 127.0.0.11 ipv6=off valid=5s;" /etc/nginx/locals.conf
     grep -Fq "proxy_buffering off;" /etc/nginx/proxy_streaming
     grep -Fq "proxy_request_buffering off;" /etc/nginx/proxy_streaming
