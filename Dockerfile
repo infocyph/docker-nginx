@@ -20,7 +20,8 @@ RUN apk add --no-cache \
 
 ENV LANG=en_US.UTF-8 \
     LC_ALL=en_US.UTF-8 \
-    TZ=${TZ}
+    TZ=${TZ} \
+    LLM_PROXY_TIMEOUT_SECONDS=1800
 
 COPY scripts/fcgi-params.sh /usr/local/bin/fcgi_params.sh
 COPY scripts/proxy-params.sh /usr/local/bin/proxy_params.sh
