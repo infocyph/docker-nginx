@@ -104,7 +104,8 @@ done
 
 docker exec "$proxy" grep -Fq 'proxy_send_timeout    7s;' /etc/nginx/locals.conf
 docker exec "$proxy" grep -Fq 'proxy_read_timeout    7s;' /etc/nginx/locals.conf
-if docker exec "$proxy" awk '/server_name llm\.localhost;/{found=1} found && /include \/etc\/nginx\/proxy_timeouts;/{exit 0} found && /^}/{exit 1} END{exit 1}' /etc/nginx/locals.conf; then
+llm_block="$(docker exec "$proxy" awk '/server_name llm\.localhost;/{capture=1} capture{print} capture && /^}/{exit}' /etc/nginx/locals.conf)"
+if grep -Fq 'include /etc/nginx/proxy_timeouts;' <<<"$llm_block"; then
   echo 'LLM route unexpectedly inherited the generic proxy_timeouts include.' >&2
   exit 1
 fi
