@@ -5,8 +5,8 @@ OUT="/etc/nginx/locals.conf"
 LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
 LOCALHOST_CLIENT_MAX_BODY_SIZE="${LOCALHOST_CLIENT_MAX_BODY_SIZE:-10G}"
 LLM_PROXY_TIMEOUT_SECONDS="${LLM_PROXY_TIMEOUT_SECONDS:-1800}"
-LLM_HOST="llm.localhost"
-LLM_UPSTREAM="llm-sm:11434"
+LLM_HOST="llm-ollama.localhost"
+LLM_UPSTREAM="llm-ollama:11434"
 
 PREDEFINED_ROUTES="
 admin.localhost server-tools:9911
@@ -248,7 +248,7 @@ server {
   }
 }
 
-# Dedicated Ollama/OpenAI-compatible route. llm-sm is optional and therefore
+# Dedicated Ollama/OpenAI-compatible route. llm-ollama is optional and therefore
 # resolved lazily by Docker DNS at request time instead of during Nginx startup.
 server {
   listen 443 ssl;
