@@ -4,6 +4,7 @@ set -eu
 OUT="/etc/nginx/locals.conf"
 LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
 LOCALHOST_CLIENT_MAX_BODY_SIZE="${LOCALHOST_CLIENT_MAX_BODY_SIZE:-10G}"
+LLM_PROXY_TIMEOUT_SECONDS="${LLM_PROXY_TIMEOUT_SECONDS:-1800}"
 LLM_HOST="llm.localhost"
 LLM_UPSTREAM="llm-sm:11434"
 
@@ -29,6 +30,18 @@ if ! printf '%s\n' "$LOCALHOST_CLIENT_MAX_BODY_SIZE" | grep -Eq '^[1-9][0-9]*[kK
   exit 1
 fi
 LOCALHOST_CLIENT_MAX_BODY_SIZE="$(printf '%s' "$LOCALHOST_CLIENT_MAX_BODY_SIZE" | tr 'kmg' 'KMG')"
+
+case "$LLM_PROXY_TIMEOUT_SECONDS" in
+  *[!0-9]*|'')
+    echo "ERROR: invalid LLM_PROXY_TIMEOUT_SECONDS=$LLM_PROXY_TIMEOUT_SECONDS" >&2
+    exit 1
+    ;;
+esac
+
+if [ "$LLM_PROXY_TIMEOUT_SECONDS" -lt 1 ] || [ "$LLM_PROXY_TIMEOUT_SECONDS" -gt 3600 ]; then
+  echo "ERROR: LLM_PROXY_TIMEOUT_SECONDS must be between 1 and 3600 seconds" >&2
+  exit 1
+fi
 
 emit_user_routes() {
   [ -n "${LOCALHOST_ROUTES:-}" ] || return 0
@@ -267,7 +280,9 @@ server {
 
   location / {
     include /etc/nginx/proxy_params;
-    include /etc/nginx/proxy_timeouts;
+    proxy_connect_timeout 10s;
+    proxy_send_timeout    ${LLM_PROXY_TIMEOUT_SECONDS}s;
+    proxy_read_timeout    ${LLM_PROXY_TIMEOUT_SECONDS}s;
     include /etc/nginx/proxy_streaming;
     proxy_http_version 1.1;
     proxy_set_header Host \$host;
