@@ -89,6 +89,7 @@ docker run -d \
   -p "127.0.0.1:${http_port}:80" \
   -p "127.0.0.1:${https_port}:443" \
   -e LOCALHOST_ROUTES='llm.localhost=evil:9999' \
+  -e LLM_PROXY_TIMEOUT_SECONDS=7 \
   -v "$tmp/mkcert:/etc/mkcert:ro" \
   -v "$tmp/rootca:/etc/share/rootCA:ro" \
   "$image" >/dev/null
@@ -100,6 +101,13 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 [ "$(docker inspect -f '{{.State.Health.Status}}' "$proxy")" = healthy ]
+
+docker exec "$proxy" grep -Fq 'proxy_send_timeout    7s;' /etc/nginx/locals.conf
+docker exec "$proxy" grep -Fq 'proxy_read_timeout    7s;' /etc/nginx/locals.conf
+if docker exec "$proxy" awk '/server_name llm\.localhost;/{found=1} found && /include \/etc\/nginx\/proxy_timeouts;/{exit 0} found && /^}/{exit 1} END{exit 1}' /etc/nginx/locals.conf; then
+  echo 'LLM route unexpectedly inherited the generic proxy_timeouts include.' >&2
+  exit 1
+fi
 
 headers="$(curl -sS -D - -o /dev/null -H 'Host: llm.localhost' "http://127.0.0.1:${http_port}/api/tags")"
 printf '%s\n' "$headers" | grep -Eq '^HTTP/1\.[01] 301'
