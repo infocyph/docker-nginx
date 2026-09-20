@@ -12,8 +12,10 @@ llm-ollama.localhost   -> Ollama
 llm-fastflow.localhost -> FastFlow
 ```
 
-The common Docker DNS identity is `llm`. LocalDevStack normalizes the active provider
-onto internal port `11434`, so provider-neutral clients use:
+The common Docker DNS identity is `llm`. The provider services are mutually exclusive:
+`llm-ollama` and `llm-fastflow` never run at the same time. LocalDevStack gives the
+selected provider the `llm` alias and normalizes it onto internal port `11434`, so
+provider-neutral clients use:
 
 ```text
 http://llm:11434/v1
@@ -28,6 +30,9 @@ http://llm:11434/v1
 - portable common API is OpenAI-compatible `/v1`;
 - Ollama-native `/api/*` stays provider-specific;
 - all LLM DNS is lazy so absent providers do not prevent Nginx startup;
+- exactly one provider owns the common `llm` alias at a time;
+- inactive provider-specific routes fail with 502 rather than being silently redirected
+  to the active provider;
 - streaming remains unbuffered with the dedicated LLM timeout.
 
 ## Security
@@ -41,7 +46,10 @@ http://llm:11434/v1
 Release smoke must prove:
 
 1. all three reserved hosts redirect HTTP -> HTTPS;
-2. all three resolve lazily after provider startup;
-3. Ollama native API survives on `llm-ollama.localhost`;
-4. OpenAI SSE survives common, Ollama and FastFlow identities;
-5. native `11434` resolves only through the common `llm` alias.
+2. with no provider, all LLM HTTPS/native routes fail lazily without breaking Nginx;
+3. Ollama-only phase owns `llm` + `llm-ollama`, while FastFlow stays unavailable;
+4. Ollama native API survives on `llm-ollama.localhost`;
+5. Ollama is removed before FastFlow starts;
+6. FastFlow-only phase owns `llm` + `llm-fastflow`, while Ollama stays unavailable;
+7. OpenAI SSE survives the common route in both phases;
+8. native `11434` always resolves only through the selected common `llm` alias.
