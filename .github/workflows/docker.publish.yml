@@ -228,7 +228,7 @@ jobs:
           no-cache: true
           push: false
           tags: infocyph/nginx:publish-candidate
-          cache-to: type=gha,scope=publish-candidate-amd64,mode=max
+          cache-to: type=gha,scope=publish-candidate-amd64,mode=max,ignore-error=true
 
       - name: Record candidate upstream resolution
         env:
@@ -279,7 +279,7 @@ jobs:
           no-cache: true
           push: false
           tags: infocyph/nginx:publish-candidate-arm64
-          cache-to: type=gha,scope=publish-candidate-arm64,mode=max
+          cache-to: type=gha,scope=publish-candidate-arm64,mode=max,ignore-error=true
 
       - name: Final arm64 release-candidate gate
         run: |
@@ -490,7 +490,7 @@ jobs:
           cache-from: |
             type=gha,scope=publish-candidate-amd64
             type=gha,scope=publish-candidate-arm64
-          cache-to: type=gha,scope=publish-multiarch,mode=max
+          cache-to: type=gha,scope=publish-multiarch,mode=max,ignore-error=true
           provenance: mode=max
           sbom: true
 
