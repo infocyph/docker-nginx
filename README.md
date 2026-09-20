@@ -105,6 +105,11 @@ llm-ollama.localhost   -> llm-ollama:11434
 llm-fastflow.localhost -> llm-fastflow:11434
 ```
 
+The two provider services are mutually exclusive for one LocalDevStack runtime.
+`llm-ollama` and `llm-fastflow` never run at the same time. The selected provider
+owns the common Docker alias `llm`; the inactive provider-specific route resolves
+lazily and returns 502 while its service is absent.
+
 The common identity is the application-facing contract. Its portable API is:
 
 ```text
@@ -129,14 +134,15 @@ https://llm-fastflow.localhost/v1/chat/completions
 
 LocalDevStack normalizes whichever provider is selected onto the internal LLM ABI port
 `11434`. Ollama already listens there; FastFlow is configured with
-`FLM_SERVE_PORT=11434` when used inside LocalDevStack. The selected provider also owns
-the Docker-network alias `llm`.
+`FLM_SERVE_PORT=11434` when used inside LocalDevStack. Exactly one provider owns the
+Docker-network alias `llm` at a time.
 
 All LLM routes use HTTP/1.1 streaming with proxy/request buffering disabled, gzip
 disabled, Docker DNS re-resolution, and a dedicated long-running request budget.
 `LLM_PROXY_TIMEOUT_SECONDS` defaults to `1800` (30 minutes) and controls only the LLM
-route proxy send/read timeouts. Nginx starts normally when one or both provider-specific
-services are absent; Docker DNS is resolved lazily at request time.
+route proxy send/read timeouts. Nginx starts normally before an LLM provider is started. At steady state exactly one
+provider is expected to exist; Docker DNS is resolved lazily so switching the common
+`llm` alias between Ollama and FastFlow does not require rebuilding Nginx.
 
 No wildcard CORS policy is added here. Browser-origin policy belongs to the selected LLM
 runtime contract.
