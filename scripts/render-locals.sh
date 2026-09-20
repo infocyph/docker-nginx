@@ -5,8 +5,12 @@ OUT="/etc/nginx/locals.conf"
 LOCALHOST_ROUTES="${LOCALHOST_ROUTES:-}"
 LOCALHOST_CLIENT_MAX_BODY_SIZE="${LOCALHOST_CLIENT_MAX_BODY_SIZE:-10G}"
 LLM_PROXY_TIMEOUT_SECONDS="${LLM_PROXY_TIMEOUT_SECONDS:-1800}"
-LLM_HOST="llm-ollama.localhost"
-LLM_UPSTREAM="llm-ollama:11434"
+LLM_COMMON_HOST="llm.localhost"
+LLM_COMMON_UPSTREAM="llm:11434"
+LLM_OLLAMA_HOST="llm-ollama.localhost"
+LLM_OLLAMA_UPSTREAM="llm-ollama:11434"
+LLM_FASTFLOW_HOST="llm-fastflow.localhost"
+LLM_FASTFLOW_UPSTREAM="llm-fastflow:11434"
 
 PREDEFINED_ROUTES="
 admin.localhost server-tools:9911
@@ -15,7 +19,9 @@ db.localhost cloud-beaver:8978
 ri.localhost redis-insight:5540
 me.localhost mongo-express:8081
 kibana.localhost kibana:5601
-${LLM_HOST} ${LLM_UPSTREAM}
+${LLM_COMMON_HOST} ${LLM_COMMON_UPSTREAM}
+${LLM_OLLAMA_HOST} ${LLM_OLLAMA_UPSTREAM}
+${LLM_FASTFLOW_HOST} ${LLM_FASTFLOW_UPSTREAM}
 "
 
 case "$LOCALHOST_CLIENT_MAX_BODY_SIZE" in
@@ -111,7 +117,11 @@ build_redirect_server_names() {
 }
 
 build_generic_server_names() {
-  printf '%s\n' "$PREDEFINED_ROUTES" | awk -v llm="$LLM_HOST" 'NF==2 && $1 != llm {print $1}'
+  printf '%s\n' "$PREDEFINED_ROUTES" | awk \
+    -v common="$LLM_COMMON_HOST" \
+    -v ollama="$LLM_OLLAMA_HOST" \
+    -v fastflow="$LLM_FASTFLOW_HOST" \
+    'NF==2 && $1 != common && $1 != ollama && $1 != fastflow {print $1}'
   emit_user_routes | awk '{print $1}' | while read -r h; do
     [ -n "${h:-}" ] || continue
     is_predefined_host "$h" && continue
@@ -151,6 +161,15 @@ emit_user_routes | while read -r host upstream; do
 done
 
 cat >>"$TMP" <<EOF
+}
+
+# Reserved LLM host -> provider-specific Docker DNS upstream.
+# All provider services use the LocalDevStack internal LLM port ABI (11434).
+map \$host \$llm_route_upstream {
+  default "";
+  ${LLM_COMMON_HOST} ${LLM_COMMON_UPSTREAM};
+  ${LLM_OLLAMA_HOST} ${LLM_OLLAMA_UPSTREAM};
+  ${LLM_FASTFLOW_HOST} ${LLM_FASTFLOW_UPSTREAM};
 }
 
 # Reject unknown HTTP hosts instead of redirecting arbitrary Host values.
@@ -248,11 +267,12 @@ server {
   }
 }
 
-# Native Ollama/OpenAI-compatible HTTP route. LocalDevStack publishes this
-# listener loopback-only on the host; llm-ollama itself remains internal.
+# Native provider-neutral OpenAI-compatible route. LocalDevStack publishes
+# this listener loopback-only on the host. The selected provider owns the
+# Docker-network alias "llm" and the normalized internal port 11434.
 server {
   listen 11434;
-  server_name ${LLM_HOST} localhost 127.0.0.1;
+  server_name ${LLM_COMMON_HOST} localhost 127.0.0.1;
 
   client_max_body_size ${LOCALHOST_CLIENT_MAX_BODY_SIZE};
   client_body_timeout 300s;
@@ -262,7 +282,7 @@ server {
 
   resolver 127.0.0.11 ipv6=off valid=5s;
   resolver_timeout 2s;
-  set \$llm_upstream "${LLM_UPSTREAM}";
+  set \$llm_native_upstream "${LLM_COMMON_UPSTREAM}";
 
   location / {
     include /etc/nginx/proxy_params;
@@ -274,17 +294,20 @@ server {
     proxy_set_header Host \$host;
     proxy_set_header Connection "";
     gzip off;
-    proxy_pass http://\$llm_upstream;
+    proxy_pass http://\$llm_native_upstream;
     proxy_redirect off;
   }
 }
 
-# Dedicated HTTPS Ollama/OpenAI-compatible route. llm-ollama is optional and therefore
-# resolved lazily by Docker DNS at request time instead of during Nginx startup.
+# Dedicated HTTPS LLM routes:
+#   llm.localhost          -> selected provider
+#   llm-ollama.localhost   -> Ollama only
+#   llm-fastflow.localhost -> FastFlow only
+# Provider DNS names are resolved lazily so either backend may be absent.
 server {
   listen 443 ssl;
   http2 on;
-  server_name ${LLM_HOST};
+  server_name ${LLM_COMMON_HOST} ${LLM_OLLAMA_HOST} ${LLM_FASTFLOW_HOST};
 
   ssl_certificate /etc/mkcert/lds-server.pem;
   ssl_certificate_key /etc/mkcert/lds-server-key.pem;
@@ -307,9 +330,10 @@ server {
 
   resolver 127.0.0.11 ipv6=off valid=5s;
   resolver_timeout 2s;
-  set \$llm_upstream "${LLM_UPSTREAM}";
 
   location / {
+    if (\$llm_route_upstream = "") { return 404; }
+
     include /etc/nginx/proxy_params;
     proxy_connect_timeout 10s;
     proxy_send_timeout    ${LLM_PROXY_TIMEOUT_SECONDS}s;
@@ -319,7 +343,7 @@ server {
     proxy_set_header Host \$host;
     proxy_set_header Connection "";
     gzip off;
-    proxy_pass http://\$llm_upstream;
+    proxy_pass http://\$llm_route_upstream;
     proxy_redirect off;
   }
 }

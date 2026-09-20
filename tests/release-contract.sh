@@ -105,5 +105,8 @@ require "grep -Fq 'linux/amd64'"
 require "grep -Fq 'linux/arm64'"
 require 'test "$published_nginx" = "$CANDIDATE_NGINX_VERSION"'
 require 'test "$published_banner_sha256" = "$CANDIDATE_BANNER_SHA256"'
+require 'cache-to: type=gha,scope=publish-candidate-amd64,mode=max,ignore-error=true'
+require 'cache-to: type=gha,scope=publish-candidate-arm64,mode=max,ignore-error=true'
+require 'cache-to: type=gha,scope=publish-multiarch,mode=max,ignore-error=true'
 
 printf 'Publish/release contracts passed.\n'

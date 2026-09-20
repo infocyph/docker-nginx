@@ -96,6 +96,11 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/version":
             self._send_json({"version": "mock"})
             return
+        if self.path == "/v1/models":
+            payload = self._metadata()
+            payload.update({"object": "list", "data": [{"id": "mock", "object": "model"}]})
+            self._send_json(payload)
+            return
         self._send_json(self._metadata())
 
     def do_POST(self):
