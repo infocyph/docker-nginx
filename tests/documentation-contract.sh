@@ -49,6 +49,8 @@ done
 
 require_file_text "$readme" '127.0.0.1:11434:11434'
 require_file_text "$readme" 'FLM_SERVE_PORT=11434'
+require_file_text "$readme" 'mutually exclusive'
+require_file_text "$readme" 'never run at the same time'
 require_file_text "$readme" 'OpenAI-compatible'
 require_file_text "$readme" 'BuildKit SBOM/provenance'
 require_file_text "$readme" 'Docker Hub and GHCR are required to resolve to the same resulting manifest digest'
