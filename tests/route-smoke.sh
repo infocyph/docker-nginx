@@ -7,10 +7,11 @@ fixture="$repo_root/tests/fixtures/mock-upstream/server.py"
 network="nginx-route-${RANDOM}"
 proxy="nginx-route-proxy-${RANDOM}"
 mock="nginx-route-mock-${RANDOM}"
+dbx="nginx-route-dbx-${RANDOM}"
 tmp="$(mktemp -d)"
 
 cleanup() {
-  docker rm -f "$proxy" "$mock" >/dev/null 2>&1 || true
+  docker rm -f "$proxy" "$mock" "$dbx" >/dev/null 2>&1 || true
   docker network rm "$network" >/dev/null 2>&1 || true
   rm -rf "$tmp"
 }
@@ -43,6 +44,14 @@ docker run -d \
   --network "$network" \
   --network-alias server-tools \
   -e PORT=9911 \
+  -v "$fixture:/server.py:ro" \
+  python:3.13-alpine python /server.py >/dev/null
+
+docker run -d \
+  --name "$dbx" \
+  --network "$network" \
+  --network-alias dbx \
+  -e PORT=4224 \
   -v "$fixture:/server.py:ro" \
   python:3.13-alpine python /server.py >/dev/null
 
@@ -92,6 +101,12 @@ printf '%s' "$response" | grep -Fq '"forwarded_proto":"https"'
 printf '%s' "$response" | grep -Fq '"forwarded_port":"443"'
 printf '%s' "$response" | grep -Fq '"request_id_present":true'
 printf '%s' "$response" | grep -Fq '"connection":""'
+
+dbx_response="$(curl -skS --max-time 10 \
+  --resolve "db.localhost:${https_port}:127.0.0.1" \
+  "https://db.localhost:${https_port}/inspect")"
+printf '%s' "$dbx_response" | grep -Fq '"host":"db.localhost"'
+printf '%s' "$dbx_response" | grep -Fq '"forwarded_proto":"https"'
 
 tls12_response="$(curl -skS --tlsv1.2 --tls-max 1.2 \
   --resolve "admin.localhost:${https_port}:127.0.0.1" \

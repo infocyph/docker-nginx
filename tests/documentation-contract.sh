@@ -26,6 +26,7 @@ for needle in \
   'admin.localhost' \
   'webmail.localhost' \
   'db.localhost' \
+  'dbx:4224' \
   'ri.localhost' \
   'me.localhost' \
   'kibana.localhost' \
