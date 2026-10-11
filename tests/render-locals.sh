@@ -2,7 +2,7 @@
 set -euo pipefail
 
 image="${1:-infocyph/nginx:ci}"
-routes='valid.localhost=svc-name:8080,admin.localhost=evil:1,llm.localhost=evil-common:9999,llm-ollama.localhost=evil-ollama:9999,llm-fastflow.localhost=evil-fastflow:9999,bad..localhost=bad:80,outside.test=bad:80,-bad.localhost=bad:80,bad-.localhost=bad:80,zero.localhost=svc:0,high.localhost=svc:65536,dup.localhost=first:1000,dup.localhost=second:2000,under.localhost=svc_name:8081'
+routes='valid.localhost=svc-name:8080,admin.localhost=evil:1,db.localhost=evil-db:9999,llm.localhost=evil-common:9999,llm-ollama.localhost=evil-ollama:9999,llm-fastflow.localhost=evil-fastflow:9999,bad..localhost=bad:80,outside.test=bad:80,-bad.localhost=bad:80,bad-.localhost=bad:80,zero.localhost=svc:0,high.localhost=svc:65536,dup.localhost=first:1000,dup.localhost=second:2000,under.localhost=svc_name:8081'
 
 docker run --rm \
   --entrypoint sh \
@@ -12,6 +12,9 @@ docker run --rm \
 
     grep -Fq "  valid.localhost svc-name:8080;" /etc/nginx/locals.conf
     grep -Fq "  admin.localhost server-tools:9911;" /etc/nginx/locals.conf
+    grep -Fq "  db.localhost dbx:4224;" /etc/nginx/locals.conf
+    ! grep -Fq "cloud-beaver:8978" /etc/nginx/locals.conf
+    ! grep -Fq "evil-db:9999" /etc/nginx/locals.conf
     grep -Fq "  llm.localhost llm:11434;" /etc/nginx/locals.conf
     grep -Fq "  llm-ollama.localhost llm-ollama:11434;" /etc/nginx/locals.conf
     grep -Fq "  llm-fastflow.localhost llm-fastflow:11434;" /etc/nginx/locals.conf

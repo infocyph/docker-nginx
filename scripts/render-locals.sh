@@ -15,7 +15,7 @@ LLM_FASTFLOW_UPSTREAM="llm-fastflow:11434"
 PREDEFINED_ROUTES="
 admin.localhost server-tools:9911
 webmail.localhost mailpit:8025
-db.localhost cloud-beaver:8978
+db.localhost dbx:4224
 ri.localhost redis-insight:5540
 me.localhost mongo-express:8081
 kibana.localhost kibana:5601
